@@ -19,6 +19,10 @@ data/
 .env
 .env.*
 !.env.example
+# Server config: gercek degerler VPS'te untracked durur (deploy git reset --hard ile silmesin).
+# Sablonlar *.example olarak tutulur; kurulumda kopyalanir.
+/Caddyfile
+/turnserver.conf
 .claude/
 .vscode/
 

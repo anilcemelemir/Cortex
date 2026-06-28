@@ -239,6 +239,14 @@ Cikan degeri sakla. Asagida `TURN_SIFRESI` yerine bunu kullanacaksin.
 
 ## 8. Caddy Domain Ayari
 
+Caddyfile ve turnserver.conf artik `.example` sablon olarak gelir; gercek
+dosyalar `.gitignore`'dadir, boylece auto-deploy (`git reset --hard`) onlari
+ezmez. Once sablondan kopyala:
+
+```bash
+cp Caddyfile.example Caddyfile
+```
+
 VPS uzerinde:
 
 ```bash
@@ -272,6 +280,12 @@ cortexapp.web.tr, www.cortexapp.web.tr {
 Bu durumda DNS'te `www` A kaydi da olmalidir.
 
 ## 9. TURN Ayari
+
+Sablondan kopyala (gercek dosya `.gitignore`'da):
+
+```bash
+cp turnserver.conf.example turnserver.conf
+```
 
 VPS uzerinde:
 
@@ -563,6 +577,28 @@ Get-Content $env:USERPROFILE\.ssh\cortex_deploy
 ```
 
 GitHub Actions > Deploy VPS > Run workflow ile manuel deploy calistir.
+
+### 16.1 Tek seferlik VPS migrasyonu (ONEMLI)
+
+Deploy `git reset --hard origin/main` yapar. Eger `Caddyfile` /
+`turnserver.conf` daha onceki kurulumda git-tracked olarak duzenlenmisse,
+ilk deploy onlari silmeye/ezmeye calisir. Artik bu dosyalar `.gitignore`'da
+oldugu icin, VPS'te bir kez untracked hale getir:
+
+```bash
+cd /opt/cortex
+cp Caddyfile /root/Caddyfile.bak
+cp turnserver.conf /root/turnserver.conf.bak
+git fetch origin main
+git reset --hard origin/main          # tracked sablonlar gider
+cp /root/Caddyfile.bak Caddyfile      # gercek dosyalar geri (artik untracked)
+cp /root/turnserver.conf.bak turnserver.conf
+git status                            # Caddyfile/turnserver.conf gorunmemeli
+```
+
+Bundan sonra her deploy `git reset --hard` yapsa da bu iki dosyaya dokunmaz.
+
+### 16.2 Otomatik deploy
 
 Otomatik deploy istersen Repo > Settings > Secrets and variables > Actions > Variables:
 
