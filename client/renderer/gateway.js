@@ -33,7 +33,8 @@ class Gateway {
   }
 
   _open() {
-    const url = window.serverUrls(window.Store.get('serverUrl')).ws;
+    const server = window.CONFIG.allowCustomServer ? window.Store.get('serverUrl') : window.CONFIG.defaultServer;
+    const url = window.serverUrls(server).ws;
     try {
       this.ws = new WebSocket(url);
     } catch (e) {

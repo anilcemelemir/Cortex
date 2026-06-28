@@ -172,10 +172,11 @@ Beklenen cevap:
 
 ### 9. Client'ı Kendi Sunucuna Yönlendir
 
-`client/renderer/config.js` içinde varsayılan sunucuyu değiştir:
+Canlı kurulum dosyasında kullanıcı sunucuyu elle seçmez; client doğrudan `client/renderer/config.js` içindeki endpoint'e bağlanır. Varsayılan sunucuyu kendi domaininle değiştir:
 
 ```js
-defaultServer: 'wss://cortex.ornek-domain.com',
+defaultServer: 'wss://cortexapp.web.tr',
+allowCustomServer: false,
 ```
 
 TURN'u da ekle:
@@ -185,7 +186,7 @@ iceServers: [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   {
-    urls: 'turn:cortex.ornek-domain.com:3478',
+    urls: 'turn:cortexapp.web.tr:3478',
     username: 'turnkullanici',
     credential: 'COK-GUCLU-BIR-SIFRE',
   },
@@ -202,7 +203,7 @@ npm run dist
 
 Arkadaşlarına `client/dist/Cortex-Kurulum-*.exe` dosyasını gönderebilirsin.
 
-Kullanıcılar giriş ekranındaki gelişmiş sunucu adresi alanından da `wss://cortex.ornek-domain.com` girebilir. Ancak TURN bilgisi istemci config'inde olmalıdır.
+Gerçek TURN şifresini public repoya commit etme. Bu değer installer üretmeden önce kendi lokal build'inde veya özel CI/CD secret akışında verilmelidir.
 
 ## CI/CD
 

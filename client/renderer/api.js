@@ -6,7 +6,8 @@
 
 window.Api = {
   base() {
-    return window.serverUrls(window.Store.get('serverUrl')).api;
+    const server = window.CONFIG.allowCustomServer ? window.Store.get('serverUrl') : window.CONFIG.defaultServer;
+    return window.serverUrls(server).api;
   },
 
   async request(method, path, body, withAuth = true) {

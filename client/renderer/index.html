@@ -36,7 +36,7 @@
 
       <button id="auth-submit" class="btn-primary">Giriş Yap</button>
 
-      <details class="advanced">
+      <details class="advanced hidden">
         <summary>Gelişmiş: Sunucu adresi</summary>
         <input id="auth-server" type="text" placeholder="ws://localhost:8080" />
         <p class="hint">Arkadaşlarınla kullanmak için kendi sunucunun adresi (örn. wss://sesli.site.com).</p>
@@ -288,6 +288,14 @@
           <input id="range-input-gain" type="range" min="-20" max="20" step="1" />
           <label>Aktivasyon eşiği <span id="vad-threshold-label">-55 dB</span></label>
           <input id="range-vad-threshold" type="range" min="-80" max="-20" step="1" />
+          <div class="voice-meter" id="voice-meter">
+            <div class="voice-meter-fill" id="voice-meter-fill"></div>
+            <div class="voice-meter-threshold" id="voice-meter-threshold"></div>
+          </div>
+          <div class="voice-meter-meta">
+            <span>Ses seviyesi</span>
+            <span id="voice-meter-db">-80 dB</span>
+          </div>
           <label>Gelen ses <span id="output-volume-label">100%</span></label>
           <input id="range-output-volume" type="range" min="0" max="200" step="5" />
         </div>

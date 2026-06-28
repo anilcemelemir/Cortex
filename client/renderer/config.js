@@ -10,7 +10,8 @@
 window.CONFIG = {
   // Varsayılan sunucu. wss/https = TLS (uzak sunucu için şart).
   // Örn. uzak: 'wss://sesli.senin-sunucun.com'
-  defaultServer: 'ws://localhost:8080',
+  defaultServer: 'wss://cortexapp.web.tr',
+  allowCustomServer: false,
 
   // --- ICE sunucuları ---
   // STUN: public IP keşfi (ücretsiz). TURN: NAT fallback (kendi sunucunda coturn).
@@ -18,7 +19,7 @@ window.CONFIG = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     // Kendi TURN'un (deploy rehberindeki coturn). Doldurunca P2P çok daha güvenilir:
-    // { urls: 'turn:turn.senin-sunucun.com:3478', username: 'kullanici', credential: 'sifre' },
+    // { urls: 'turn:cortexapp.web.tr:3478', username: 'turnkullanici', credential: 'TURN_SIFRESI' },
   ],
 
   // =============================================================

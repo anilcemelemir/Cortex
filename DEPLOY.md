@@ -66,10 +66,11 @@ Test: tarayıcıda `https://sesli.senin-domain.com/health` → `{"ok":true}`.
 
 ## 8) Client'ı sunucuya yönlendir
 
-`client/renderer/config.js` içinde:
+Canlı client kullanıcılara sunucu seçtirmez; `client/renderer/config.js` içinde:
 
 ```js
 defaultServer: 'wss://sesli.senin-domain.com',
+allowCustomServer: false,
 
 iceServers: [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -81,8 +82,8 @@ iceServers: [
 ],
 ```
 
-> Not: Kullanıcılar giriş ekranındaki **Gelişmiş → Sunucu adresi** alanından da
-> sunucuyu değiştirebilir; ama TURN'u config'e gömmen en sağlamı.
+> Not: Gerçek TURN şifresini public repoya commit etme. Installer üretmeden önce
+> lokal build'inde veya özel CI/CD secret akışında doldur.
 
 ## 9) `.exe`'yi yeniden üret ve paylaş
 

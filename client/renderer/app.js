@@ -176,6 +176,93 @@ function syncVoiceTuneLabels() {
   if ($('vad-threshold-label')) $('vad-threshold-label').textContent = `${threshold} dB`;
   if ($('range-output-volume')) $('range-output-volume').value = String(out);
   if ($('output-volume-label')) $('output-volume-label').textContent = `${out}%`;
+  updateVoiceMeterThreshold();
+}
+
+const voiceMeter = {
+  ctx: null,
+  source: null,
+  analyser: null,
+  data: null,
+  raf: null,
+  tempStream: null,
+  stream: null,
+  runId: 0,
+};
+function dbToPercent(db) {
+  return Math.max(0, Math.min(100, ((db + 80) / 60) * 100));
+}
+function voiceLevelFromData(data) {
+  let sum = 0;
+  for (let i = 0; i < data.length; i++) {
+    const v = (data[i] - 128) / 128;
+    sum += v * v;
+  }
+  const rms = Math.sqrt(sum / data.length);
+  return 20 * Math.log10(Math.max(rms, 0.00001));
+}
+function updateVoiceMeterThreshold() {
+  const marker = $('voice-meter-threshold');
+  if (!marker) return;
+  const threshold = clampNumber(window.Store.get('vadThresholdDb'), -80, -20, -55);
+  marker.style.left = `${dbToPercent(threshold)}%`;
+}
+function renderVoiceMeter(db) {
+  const fill = $('voice-meter-fill');
+  const label = $('voice-meter-db');
+  if (!fill || !label) return;
+  const threshold = clampNumber(window.Store.get('vadThresholdDb'), -80, -20, -55);
+  fill.style.width = `${dbToPercent(db)}%`;
+  fill.classList.toggle('active', db > threshold);
+  label.textContent = `${Math.round(db)} dB`;
+}
+async function startVoiceLevelMeter() {
+  stopVoiceLevelMeter();
+  const runId = ++voiceMeter.runId;
+  const stream = media.micStream || await navigator.mediaDevices.getUserMedia({
+    audio: {
+      deviceId: window.Store.get('micId') ? { exact: window.Store.get('micId') } : undefined,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      channelCount: 1,
+    },
+    video: false,
+  });
+  if (runId !== voiceMeter.runId) {
+    if (!media.micStream) stream.getTracks().forEach((t) => t.stop());
+    return;
+  }
+  if (!media.micStream) voiceMeter.tempStream = stream;
+  voiceMeter.stream = stream;
+  voiceMeter.ctx = new AudioContext();
+  voiceMeter.source = voiceMeter.ctx.createMediaStreamSource(stream);
+  voiceMeter.analyser = voiceMeter.ctx.createAnalyser();
+  voiceMeter.analyser.fftSize = 512;
+  voiceMeter.data = new Uint8Array(voiceMeter.analyser.fftSize);
+  voiceMeter.source.connect(voiceMeter.analyser);
+
+  const loop = () => {
+    voiceMeter.analyser.getByteTimeDomainData(voiceMeter.data);
+    renderVoiceMeter(voiceLevelFromData(voiceMeter.data));
+    voiceMeter.raf = requestAnimationFrame(loop);
+  };
+  loop();
+}
+function stopVoiceLevelMeter() {
+  voiceMeter.runId++;
+  if (voiceMeter.raf) cancelAnimationFrame(voiceMeter.raf);
+  if (voiceMeter.ctx) voiceMeter.ctx.close().catch(() => {});
+  if (voiceMeter.tempStream) voiceMeter.tempStream.getTracks().forEach((t) => t.stop());
+  voiceMeter.ctx = null;
+  voiceMeter.source = null;
+  voiceMeter.analyser = null;
+  voiceMeter.data = null;
+  voiceMeter.raf = null;
+  voiceMeter.tempStream = null;
+  voiceMeter.stream = null;
+  renderVoiceMeter(-80);
+  updateVoiceMeterThreshold();
 }
 let activityTimer = null;
 let lastActivityKey = '';
@@ -239,7 +326,8 @@ function currentMessageChannel() {
 // =============================================================
 //  Önyükleme
 // =============================================================
-$('auth-server').value = window.Store.get('serverUrl');
+window.Store.set('serverUrl', window.CONFIG.defaultServer);
+$('auth-server').value = window.CONFIG.defaultServer;
 
 (async function boot() {
   const token = window.Store.get('token');
@@ -276,7 +364,7 @@ $('auth-username').addEventListener('keydown', (e) => { if (e.key === 'Enter') $
 async function doAuth() {
   const username = $('auth-username').value.trim();
   const password = $('auth-password').value;
-  const server = $('auth-server').value.trim() || window.CONFIG.defaultServer;
+  const server = window.CONFIG.allowCustomServer ? ($('auth-server').value.trim() || window.CONFIG.defaultServer) : window.CONFIG.defaultServer;
   window.Store.set('serverUrl', server);
   $('auth-error').textContent = '';
   $('auth-submit').disabled = true;
@@ -1164,13 +1252,7 @@ function startVAD(stream, userId) {
   let raf;
   const loop = () => {
     analyser.getByteTimeDomainData(data);
-    let sum = 0;
-    for (let i = 0; i < data.length; i++) {
-      const v = (data[i] - 128) / 128;
-      sum += v * v;
-    }
-    const rms = Math.sqrt(sum / data.length);
-    const db = 20 * Math.log10(Math.max(rms, 0.00001));
+    const db = voiceLevelFromData(data);
     const threshold = clampNumber(window.Store.get('vadThresholdDb'), -80, -20, -55);
     const isSelf = userId === appState.me.id;
     const micActive = !isSelf || (!appState.voice.muted && (appState.mode !== 'ptt' || appState.pttActive));
@@ -1188,8 +1270,12 @@ function stopAllVAD() { for (const id of [...vadCtx.keys()]) stopVAD(id); }
 // =============================================================
 //  Modallar
 // =============================================================
-document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => $(b.dataset.close).classList.add('hidden')));
-document.querySelectorAll('.modal').forEach((m) => m.addEventListener('mousedown', (e) => { if (e.target === m) m.classList.add('hidden'); }));
+function closeModal(id) {
+  $(id)?.classList.add('hidden');
+  if (id === 'settings-modal') stopVoiceLevelMeter();
+}
+document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => closeModal(b.dataset.close)));
+document.querySelectorAll('.modal').forEach((m) => m.addEventListener('mousedown', (e) => { if (e.target === m) closeModal(m.id); }));
 
 // Sunucu ekle
 $('btn-add-guild').addEventListener('click', () => { $('add-guild-error').textContent = ''; $('add-guild-modal').classList.remove('hidden'); $('new-guild-name').focus(); });
@@ -1388,6 +1474,14 @@ document.querySelectorAll('.st-tab').forEach((t) => t.addEventListener('click', 
 function setSettingsTab(tab) {
   document.querySelectorAll('.st-tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === tab));
   for (const p of ['profile', 'devices', 'voice', 'keys']) $(`st-${p}`).classList.toggle('hidden', p !== tab);
+  if (tab === 'voice') {
+    startVoiceLevelMeter().catch((e) => {
+      console.warn('Ses seviyesi ölçülemedi:', e);
+      stopVoiceLevelMeter();
+    });
+  } else {
+    stopVoiceLevelMeter();
+  }
 }
 
 async function refreshDeviceLists() {
@@ -1480,6 +1574,7 @@ $('range-input-gain').addEventListener('input', (e) => {
 $('range-vad-threshold').addEventListener('input', (e) => {
   window.Store.set('vadThresholdDb', clampNumber(e.target.value, -80, -20, -55));
   syncVoiceTuneLabels();
+  updateVoiceMeterThreshold();
 });
 $('range-output-volume').addEventListener('input', (e) => {
   window.Store.set('outputVolume', clampNumber(e.target.value, 0, 200, 100) / 100);

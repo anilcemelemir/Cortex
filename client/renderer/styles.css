@@ -380,6 +380,24 @@ input, select, button { font-family: inherit; }
 .voice-tune label { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 4px; }
 .voice-tune label span { color: var(--text); font-weight: 800; text-transform: none; }
 .voice-tune input[type="range"] { width: 100%; accent-color: var(--accent); }
+.voice-meter {
+  height: 14px; position: relative; overflow: hidden; border-radius: 7px;
+  background: linear-gradient(90deg, #202225, #25272d); border: 1px solid var(--border);
+}
+.voice-meter-fill {
+  width: 0%; height: 100%; border-radius: inherit;
+  background: linear-gradient(90deg, #23a55a, #f0b232 72%, #f23f43);
+  transition: width .06s linear, filter .12s;
+}
+.voice-meter-fill.active { filter: saturate(1.25) brightness(1.08); }
+.voice-meter-threshold {
+  position: absolute; top: -2px; bottom: -2px; left: 42%;
+  width: 2px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.45), 0 0 10px rgba(255,255,255,.35);
+}
+.voice-meter-meta {
+  display: flex; justify-content: space-between; color: var(--text-muted);
+  font-size: 11px; font-weight: 700; margin-top: -2px;
+}
 .settings-member-list, .settings-channel-list { background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; max-height: 220px; overflow: auto; padding: 6px; }
 .settings-member-row { display: flex; align-items: center; gap: 8px; padding: 7px 6px; border-radius: 5px; }
 .settings-member-row .member-role { margin-left: auto; color: var(--text-muted); font-size: 12px; }
