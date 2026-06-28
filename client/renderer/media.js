@@ -42,12 +42,13 @@ class MediaManager {
   // --- Mikrofon ---
   async startMic(deviceId = this.selectedMicId) {
     this.stopMic();
+    const noiseSuppression = window.Store?.get('noiseSuppression') !== false;
     const constraints = {
       audio: {
         deviceId: deviceId ? { exact: deviceId } : undefined,
-        // Discord benzeri ses işleme:
+        // Discord benzeri ses işleme (gürültü azaltma kullanıcı tercihiyle):
         echoCancellation: true,
-        noiseSuppression: true,
+        noiseSuppression,
         autoGainControl: true,
         // Düşük gecikme için kanal/örnekleme:
         channelCount: 1,

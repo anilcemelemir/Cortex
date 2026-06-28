@@ -20,6 +20,8 @@ const voiceRooms = new Map();
 // userId -> channelId   (kullanıcı şu an hangi ses kanalında)
 const userVoice = new Map();
 const userActivities = new Map();
+// userId -> 'idle'   (yalnızca boşta olanlar tutulur; yoksa 'online' kabul edilir)
+const userStatus = new Map();
 
 function send(ws, type, payload = {}) {
   if (ws && ws.readyState === 1 /* OPEN */) {
@@ -39,6 +41,7 @@ function removeSocket(ws) {
     if (set.size === 0) {
       userSockets.delete(ws.userId);
       userActivities.delete(ws.userId);
+      userStatus.delete(ws.userId);
     }
   }
 }
@@ -50,6 +53,12 @@ function isOnline(userId) {
 function sendToUser(userId, type, payload) {
   const set = userSockets.get(userId);
   if (set) for (const ws of set) send(ws, type, payload);
+}
+
+// Bir kullanıcının açık tüm soketleri (çok cihaz / yeniden bağlanma durumları)
+function socketsForUser(userId) {
+  const set = userSockets.get(userId);
+  return set ? [...set] : [];
 }
 
 function userGuildIds(userId) {
@@ -66,6 +75,29 @@ function activitiesForGuild(guildId) {
   for (const uid of onlineMembersForGuild(guildId)) {
     const activity = userActivities.get(uid);
     if (activity) out[uid] = activity;
+  }
+  return out;
+}
+
+// --- Boşta (AFK) durumu ---
+function getStatus(userId) {
+  return userStatus.get(userId) || 'online';
+}
+
+function setStatus(userId, status) {
+  const next = status === 'idle' ? 'idle' : 'online';
+  const current = getStatus(userId);
+  if (current === next) return false;
+  if (next === 'idle') userStatus.set(userId, 'idle');
+  else userStatus.delete(userId);
+  return true;
+}
+
+// Bir guild'in çevrimiçi + boşta üyeleri: { userId: 'idle' }
+function statusesForGuild(guildId) {
+  const out = {};
+  for (const uid of onlineMembersForGuild(guildId)) {
+    if (getStatus(uid) === 'idle') out[uid] = 'idle';
   }
   return out;
 }
@@ -149,17 +181,33 @@ function voicePresenceForGuild(guildId) {
   return out;
 }
 
+// Bir guild'in dolu ses kanalları + içindekilerin durumları (ilk senkron için)
+// { channelId: [{ userId, state }] } — sadece içinde kimse olan kanallar.
+function voiceStatesForGuild(guildId) {
+  const channels = db.prepare("SELECT id FROM channels WHERE guild_id = ? AND type = 'voice'").all(guildId);
+  const out = {};
+  for (const c of channels) {
+    const states = voiceMemberStates(c.id);
+    if (states.length) out[c.id] = states;
+  }
+  return out;
+}
+
 module.exports = {
   send,
   addSocket,
   removeSocket,
   isOnline,
   sendToUser,
+  socketsForUser,
   guildMemberIds,
   userGuildIds,
   onlineMembersForGuild,
   activitiesForGuild,
   setActivity,
+  getStatus,
+  setStatus,
+  statusesForGuild,
   broadcastToGuild,
   voiceMembers,
   voiceMemberStates,
@@ -168,4 +216,5 @@ module.exports = {
   voiceUpdateState,
   voiceLeave,
   voicePresenceForGuild,
+  voiceStatesForGuild,
 };

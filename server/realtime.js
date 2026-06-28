@@ -17,6 +17,31 @@ const hub = require('./hub');
 
 const MAX_MESSAGE_LEN = 2000;
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
+const HEARTBEAT_MS = 30000; // ölü/hayalet bağlantıları tespit aralığı
+const OFFLINE_GRACE_MS = 8000; // bağlantı koptuktan sonra "çevrimdışı" ilan etmeden önce bekleme
+
+// Kısa kopuş/yeniden bağlanmada (ağ blip'i, uygulamayı tepsiden geri açma)
+// kullanıcının "çevrimdışı → çevrimiçi" titremesini önlemek için offline
+// yayınını geciktiriyoruz. Bu süre içinde geri bağlanırsa hiç offline olmaz.
+const pendingOffline = new Map(); // userId -> timeout
+
+function cancelPendingOffline(userId) {
+  const t = pendingOffline.get(userId);
+  if (t) { clearTimeout(t); pendingOffline.delete(userId); }
+}
+
+function schedulePendingOffline(userId, guildIds) {
+  cancelPendingOffline(userId);
+  const t = setTimeout(() => {
+    pendingOffline.delete(userId);
+    if (hub.isOnline(userId)) return; // bu arada geri geldi → hâlâ çevrimiçi
+    for (const guildId of guildIds) {
+      hub.broadcastToGuild(guildId, 'member-presence', { guildId, userId, online: false });
+      hub.broadcastToGuild(guildId, 'member-activity', { guildId, userId, activity: null });
+    }
+  }, OFFLINE_GRACE_MS);
+  pendingOffline.set(userId, t);
+}
 
 function userPub(userId) {
   const u = db.prepare('SELECT id, username, avatar_color, avatar_image FROM users WHERE id = ?').get(userId);
@@ -52,10 +77,23 @@ function cleanMessageAttachments(value) {
 function attach(server) {
   const wss = new WebSocketServer({ server, path: '/ws' });
 
+  // Heartbeat: yanıt vermeyen (ölü / ani kapanmış) bağlantıları temizle.
+  // terminate() → ws 'close' olayını tetikler → leaveVoice + presence güncellenir.
+  const heartbeat = setInterval(() => {
+    for (const client of wss.clients) {
+      if (client.isAlive === false) { client.terminate(); continue; }
+      client.isAlive = false;
+      try { client.ping(); } catch {}
+    }
+  }, HEARTBEAT_MS);
+  wss.on('close', () => clearInterval(heartbeat));
+
   wss.on('connection', (ws) => {
     ws.userId = null;
     ws.authed = false;
     ws.inVoiceChannel = null;
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
 
     // Kimlik doğrulanmazsa 5sn içinde bağlantıyı kes
     const authTimer = setTimeout(() => { if (!ws.authed) ws.close(); }, 5000);
@@ -74,17 +112,25 @@ function attach(server) {
         if (!ws.user) { ws.close(); return; }
         ws.authed = true;
         clearTimeout(authTimer);
+        const wasOffline = !hub.isOnline(ws.userId);
         hub.addSocket(ws);
+        cancelPendingOffline(ws.userId); // geri geldi → bekleyen offline'ı iptal et
         const guildIds = hub.userGuildIds(ws.userId);
         const onlineByGuild = {};
         const activitiesByGuild = {};
+        const voiceByGuild = {};
+        const statusByGuild = {};
         for (const guildId of guildIds) {
           onlineByGuild[guildId] = hub.onlineMembersForGuild(guildId);
           activitiesByGuild[guildId] = hub.activitiesForGuild(guildId);
-          hub.broadcastToGuild(guildId, 'member-presence', { guildId, userId: ws.userId, online: true });
+          voiceByGuild[guildId] = hub.voiceStatesForGuild(guildId);
+          statusByGuild[guildId] = hub.statusesForGuild(guildId);
+          // Sadece gerçekten çevrimdışıyken (ilk soket) çevrimiçi yayınla →
+          // ikinci cihaz / hızlı reconnect gereksiz titreme yapmaz.
+          if (wasOffline) hub.broadcastToGuild(guildId, 'member-presence', { guildId, userId: ws.userId, online: true });
         }
         hub.send(ws, 'ready', { user: ws.user });
-        hub.send(ws, 'presence-sync', { guilds: onlineByGuild, activities: activitiesByGuild });
+        hub.send(ws, 'presence-sync', { guilds: onlineByGuild, activities: activitiesByGuild, voice: voiceByGuild, statuses: statusByGuild });
         return;
       }
 
@@ -97,12 +143,9 @@ function attach(server) {
       const guildIds = hub.userGuildIds(ws.userId);
       leaveVoice(ws);
       hub.removeSocket(ws);
-      if (!hub.isOnline(ws.userId)) {
-        for (const guildId of guildIds) {
-          hub.broadcastToGuild(guildId, 'member-presence', { guildId, userId: ws.userId, online: false });
-          hub.broadcastToGuild(guildId, 'member-activity', { guildId, userId: ws.userId, activity: null });
-        }
-      }
+      // Başka soketi kalmadıysa hemen çevrimdışı ilan etme; kısa süre bekle
+      // (reconnect titremesini önler). Süre içinde dönerse offline hiç olmaz.
+      if (!hub.isOnline(ws.userId)) schedulePendingOffline(ws.userId, guildIds);
     });
 
     ws.on('error', () => {});
@@ -118,6 +161,7 @@ function handle(ws, msg) {
     case 'signal':       return relaySignal(ws, msg);
     case 'voice-state':  return updateVoiceState(ws, msg.state);
     case 'activity-update': return updateActivity(ws, msg.activity);
+    case 'status-update':   return updateStatus(ws, msg.status);
     case 'send-message': return sendMessage(ws, msg);
     case 'typing':       return typing(ws, msg.channelId);
     default: break;
@@ -129,13 +173,19 @@ function joinVoice(ws, channelId) {
   const ch = voiceChannel(channelId);
   if (!ch) return;
   if (!isMember(ch.guild_id, ws.userId)) return;
+  if (ws.inVoiceChannel === channelId) return; // bu soket zaten içeride
 
-  // Önce mevcut kanaldan ayrıl (varsa)
-  if (ws.inVoiceChannel && ws.inVoiceChannel !== channelId) leaveVoice(ws);
-  if (ws.inVoiceChannel === channelId) return; // zaten içeride
+  // Bu kullanıcının önceki ses varlığını TAMAMEN temizle: ister bu soket,
+  // ister eski/hayalet bir soket (ani kapanış), ister başka kanal olsun.
+  // endVoicePresence eski peer'lere 'voice-peer-left' yollar → onlar stale
+  // bağlantıyı düşürür ve birazdan gelecek 'voice-peer-joined' ile yeniden kurar.
+  // Bu sayede uygulamayı kapatıp açınca aynı kanala yeniden girilebilir.
+  endVoicePresence(ws.userId);
+  for (const s of hub.socketsForUser(ws.userId)) s.inVoiceChannel = null;
 
-  // Katılmadan ÖNCE oradakileri al → yeni gelen onlara bağlantı başlatır
+  // Katılmadan ÖNCE oradakileri al (kendimiz hariç) → yeni gelen onlara bağlanır
   const existing = hub.voiceMemberStates(channelId)
+    .filter(({ userId }) => userId !== ws.userId)
     .map(({ userId, state }) => ({ userId, user: userPub(userId), state }))
     .filter((p) => p.user);
 
@@ -154,22 +204,28 @@ function joinVoice(ws, channelId) {
   hub.broadcastToGuild(ch.guild_id, 'voice-presence', { channelId, members: hub.voiceMembers(channelId) });
 }
 
-// --- Ses kanalından ayrıl ---
-function leaveVoice(ws) {
-  const channelId = ws.inVoiceChannel;
+// --- Bir kullanıcının ses varlığını (hangi soket olursa olsun) sonlandır ---
+function endVoicePresence(userId) {
+  const channelId = hub.userVoiceChannel(userId);
   if (!channelId) return;
-  ws.inVoiceChannel = null;
 
   const ch = db.prepare('SELECT guild_id FROM channels WHERE id = ?').get(channelId);
-  hub.voiceLeave(ws.userId);
+  hub.voiceLeave(userId);
 
   // Kalanlara ayrıldığını bildir
   for (const uid of hub.voiceMembers(channelId)) {
-    hub.sendToUser(uid, 'voice-peer-left', { channelId, userId: ws.userId });
+    hub.sendToUser(uid, 'voice-peer-left', { channelId, userId });
   }
   if (ch) {
     hub.broadcastToGuild(ch.guild_id, 'voice-presence', { channelId, members: hub.voiceMembers(channelId) });
   }
+}
+
+// --- Ses kanalından ayrıl (soket kapanışı / leave-voice mesajı) ---
+function leaveVoice(ws) {
+  if (!ws.inVoiceChannel) return;
+  ws.inVoiceChannel = null;
+  endVoicePresence(ws.userId);
 }
 
 // --- WebRTC signaling relay (offer/answer/ice) ---
@@ -204,6 +260,15 @@ function updateActivity(ws, activity) {
   if (!hub.setActivity(ws.userId, next)) return;
   for (const guildId of hub.userGuildIds(ws.userId)) {
     hub.broadcastToGuild(guildId, 'member-activity', { guildId, userId: ws.userId, activity: next });
+  }
+}
+
+// --- Boşta (AFK) durumu ---
+function updateStatus(ws, status) {
+  if (!hub.setStatus(ws.userId, status)) return;
+  const next = hub.getStatus(ws.userId);
+  for (const guildId of hub.userGuildIds(ws.userId)) {
+    hub.broadcastToGuild(guildId, 'member-status', { guildId, userId: ws.userId, status: next });
   }
 }
 

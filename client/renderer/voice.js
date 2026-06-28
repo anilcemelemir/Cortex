@@ -38,7 +38,10 @@ class VoiceMesh {
     });
     g.on('voice-peer-joined', ({ channelId, userId }) => {
       if (channelId !== this.channelId) return;
-      if (this.peers.has(userId)) return;
+      // Eski/stale bir bağlantı kalmışsa (peer kapatıp tekrar açmışsa) onu
+      // kapat ve sıfırdan kur — aksi halde yeniden katılan kişi sessiz kalır.
+      const old = this.peers.get(userId);
+      if (old) { old.close(); this.peers.delete(userId); }
       // Yeni gelen bana bağlanacak; ben non-initiator bekliyorum
       this._createPeer(userId, /*initiator*/ false);
     });
@@ -225,14 +228,17 @@ class PeerConn {
     const p = this.mesh.profile;
     await this._setBitrate(this.tx.mic.sender, p.audioBitrate);
     await this._setBitrate(this.tx.camera.sender, p.cameraBitrate);
-    await this._setBitrate(this.tx.screen.sender, p.screenBitrate);
+    // Ekran için kareyi koru (maintain-framerate): yük altında çözünürlüğü
+    // düşürür ama fps'i korur → izlerken mikro takılma/stutter azalır.
+    await this._setBitrate(this.tx.screen.sender, p.screenBitrate, 'maintain-framerate');
   }
 
-  async _setBitrate(sender, maxBitrate) {
+  async _setBitrate(sender, maxBitrate, degradationPreference) {
     if (!sender) return;
     const params = sender.getParameters();
     if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
     params.encodings[0].maxBitrate = maxBitrate;
+    if (degradationPreference) params.degradationPreference = degradationPreference;
     try { await sender.setParameters(params); } catch (e) {}
   }
 

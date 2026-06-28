@@ -15,6 +15,7 @@ const defaults = {
   cameraId: null,
   profileKey: window.CONFIG.defaultProfile,
   voiceMode: 'vad',        // 'vad' (ses algılama) | 'ptt' (bas-konuş)
+  noiseSuppression: true,  // mikrofon gürültü azaltma (tarayıcı/Chromium)
   pttKey: 'CapsLock',      // push-to-talk tuşu (varsayılan)
   pttKeyLabel: 'Caps Lock',
   activityEnabled: true,

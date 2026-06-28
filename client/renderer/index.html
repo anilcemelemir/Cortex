@@ -242,6 +242,7 @@
         <button class="st-tab" data-tab="devices">Cihazlar</button>
         <button class="st-tab" data-tab="voice">Ses & Mod</button>
         <button class="st-tab" data-tab="keys">Kısayollar</button>
+        <button class="st-tab" data-tab="general">Genel</button>
       </div>
 
       <div class="st-pane" id="st-profile">
@@ -280,6 +281,7 @@
           <label class="type-opt"><input type="radio" name="voice-mode" value="vad" /> Ses algılama</label>
           <label class="type-opt"><input type="radio" name="voice-mode" value="ptt" /> Bas-konuş (PTT)</label>
         </div>
+        <label class="inline-check"><input type="checkbox" id="chk-noise-suppression" /> Gürültü azaltma (arka plan sesini bastır)</label>
         <label>Kalite profili</label>
         <select id="sel-profile"></select>
         <p class="hint" id="settings-profile-hint"></p>
@@ -308,6 +310,11 @@
           <button class="btn-secondary" id="btn-rebind-ptt">Değiştir</button>
         </div>
         <p class="hint" id="ptt-hint">Bu tuşu basılı tuttuğun sürece konuşursun. Oyun açıkken bile çalışır (global kısayol).</p>
+      </div>
+
+      <div class="st-pane hidden" id="st-general">
+        <label class="inline-check"><input type="checkbox" id="chk-auto-launch" /> Windows açılışında Cortex'i otomatik başlat</label>
+        <p class="hint">Bilgisayarını açtığında Cortex arka planda hazır olur. İstediğin zaman buradan kapatabilirsin.</p>
       </div>
     </div>
   </div>
@@ -341,6 +348,9 @@
       <div id="source-list" class="source-list"><p class="loading">Kaynaklar yükleniyor…</p></div>
     </div>
   </div>
+
+  <!-- Bildirimler (toast) -->
+  <div id="toast-container" class="toast-container"></div>
 
   <script src="config.js"></script>
   <script src="store.js"></script>

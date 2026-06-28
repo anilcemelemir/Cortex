@@ -14,12 +14,16 @@ const appState = (window.appState = {
   voice: {
     channelId: null, guildId: null, connected: false,
     muted: false, speakerMuted: false, camOn: false, screenOn: false,
+    vadSpeaking: false,       // VAD modunda şu an konuşuyor muyuz (gürültü kapısı)
     pings: new Map(),         // userId -> ms
     audioEls: new Map(),      // userId -> audio element
+    screenStreams: new Map(), // userId -> MediaStream (gelen ekran yayını; İzle'ye basınca gösterilir)
   },
   voicePresence: new Map(),   // channelId -> [userId]
   voiceStates: new Map(),     // userId -> { muted, camOn, screenOn }
   onlineUsers: new Set(),     // userId
+  idleUsers: new Set(),       // userId (boşta / AFK)
+  myIdle: false,              // kendi AFK durumumuz (reconnect'te yeniden bildirmek için)
   activities: new Map(),      // userId -> { type, name, service }
   messages: new Map(),        // channelId -> [msg]
   mode: window.Store.get('voiceMode'),
@@ -147,6 +151,21 @@ function renderAttachmentTray() {
 }
 function playSound(name) {
   window.CortexSounds?.play(name);
+}
+
+// --- Bildirim (toast) ---
+function toast(message, type = 'success') {
+  const container = $('toast-container');
+  if (!container) return;
+  const node = el('div', `toast ${type}`);
+  const ic = type === 'error' ? 'warn' : (type === 'info' ? 'cortex' : 'check');
+  node.innerHTML = `${icon(ic, 'toast-icon')}<span>${escapeHtml(message)}</span>`;
+  container.appendChild(node);
+  requestAnimationFrame(() => node.classList.add('show'));
+  setTimeout(() => {
+    node.classList.remove('show');
+    setTimeout(() => node.remove(), 220);
+  }, 2600);
 }
 function activityText(activity) {
   if (!activity?.name) return '';
@@ -296,6 +315,22 @@ function startActivityReporter() {
   if (activityTimer) clearInterval(activityTimer);
   publishDesktopActivity(true);
   activityTimer = setInterval(() => publishDesktopActivity(false), 15000);
+}
+
+// --- Boşta (AFK) durumu ---
+function setMyIdle(idle) {
+  appState.myIdle = !!idle;
+  const status = idle ? 'idle' : 'online';
+  window.gateway?.send({ type: 'status-update', status });
+  // Yerel görünümü hemen güncelle
+  if (appState.me?.id) {
+    if (idle) appState.idleUsers.add(appState.me.id);
+    else appState.idleUsers.delete(appState.me.id);
+    renderMemberSidebar();
+  }
+}
+if (window.system?.onIdleChange) {
+  window.system.onIdleChange((idle) => setMyIdle(idle));
 }
 function updateCachedMember(member) {
   if (!member || !member.id) return;
@@ -584,14 +619,16 @@ function memberRow(member) {
   const voiceChannelId = voiceChannelForUser(member.id);
   const state = appState.voiceStates.get(member.id) || {};
   const online = appState.onlineUsers.has(member.id);
+  const idle = online && appState.idleUsers.has(member.id);
   const activityMeta = activityText(appState.activities.get(member.id));
   let meta = state.screenOn
     ? `Ekran paylaşıyor${voiceChannelId ? ' · ' + voiceChannelName(voiceChannelId) : ''}`
-    : (voiceChannelId ? `Seste · ${voiceChannelName(voiceChannelId)}` : (online ? 'Çevrimiçi' : 'Çevrimdışı'));
+    : (voiceChannelId ? `Seste · ${voiceChannelName(voiceChannelId)}` : (online ? (idle ? 'Boşta' : 'Çevrimiçi') : 'Çevrimdışı'));
   if (!state.screenOn && !voiceChannelId && activityMeta) meta = activityMeta;
+  const statusClass = online ? (idle ? 'idle' : 'online') : '';
   row.innerHTML = `
     ${avatarHtml('vo-avatar', member)}
-    <span class="member-status ${online ? 'online' : ''}"></span>
+    <span class="member-status ${statusClass}" title="${idle ? 'Boşta' : (online ? 'Çevrimiçi' : 'Çevrimdışı')}"></span>
     <div class="member-main">
       <div class="member-name-line">
         <div class="member-name">${escapeHtml(member.username)}${member.id === appState.me.id ? ' (sen)' : ''}</div>
@@ -610,19 +647,15 @@ function memberRow(member) {
 async function watchScreenShare(userId) {
   const channelId = voiceChannelForUser(userId);
   if (!channelId) return;
+  // Yayıncının kanalında değilsek önce katıl, sonra yayını aç.
   if (!appState.voice.connected || appState.voice.channelId !== channelId) {
     await selectVoiceChannel(channelId);
   } else {
     showVoiceView(channelId);
   }
-  setTimeout(() => {
-    const tile = $(`tile-screen-${userId}`);
-    if (tile) {
-      tile.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      tile.classList.add('speaking');
-      setTimeout(() => tile.classList.remove('speaking'), 900);
-    }
-  }, 350);
+  // Track henüz gelmemiş olabilir; openScreenWatch tile'ı açar, stream gelince
+  // handleRemoteTrack videoyu bağlar. Burada da bir kez bağlamayı deniyoruz.
+  openScreenWatch(userId);
 }
 
 // =============================================================
@@ -861,7 +894,10 @@ async function joinVoice(channelId) {
 
   showVoiceView(channelId);
   addVoiceTile(appState.me.id); // kendi tile'ımız
-  startVAD(media.micStream, appState.me.id);
+  // Self VAD ham mikrofonu analiz eder; gürültü kapısı micStream'i kıssa bile
+  // analiz susmaz, böylece konuşunca kapı tekrar açılabilir.
+  appState.voice.vadSpeaking = false;
+  startVAD(media.rawMicStream || media.micStream, appState.me.id);
   applyMicEnabled();
   broadcastVoiceState();
 
@@ -876,6 +912,7 @@ async function leaveVoice() {
   for (const audio of appState.voice.audioEls.values()) audio.remove();
   appState.voice.audioEls.clear();
   appState.voice.pings.clear();
+  appState.voice.screenStreams.clear();
   stopAllVAD();
   media.stopMic(); media.stopCamera(); media.stopScreen();
 
@@ -925,6 +962,7 @@ function addVoiceTile(userId) {
 function removeVoiceTile(userId) {
   $(`tile-voice-${userId}`)?.remove();
   $(`tile-screen-${userId}`)?.remove();
+  appState.voice.screenStreams.delete(userId);
 }
 
 function handleRemoteTrack(userId, type, track, stream) {
@@ -939,9 +977,14 @@ function handleRemoteTrack(userId, type, track, stream) {
   } else if (type === 'camera') {
     showVideoOnTile(userId, track);
   } else if (type === 'screen') {
-    rememberVoiceState(userId, { screenOn: true });
-    renderMemberSidebar();
-    showScreenTile(userId, track);
+    // Ekran transceiver'ı her bağlantıda sabit gelir (kişi paylaşmıyorken bile
+    // sessiz bir track olarak). Bu yüzden track'in gelmesini "ekran paylaşıyor"
+    // saymıyoruz — o bilgi voice-peer-state'ten gelir. Track'i sakla; kullanıcı
+    // "İzle"ye bastığında göster. Zaten izleniyorsa görüntüyü tazele.
+    const stream = new MediaStream([track]);
+    appState.voice.screenStreams.set(userId, stream);
+    const video = $(`video-screen-${userId}`);
+    if (video) video.srcObject = stream;
   }
 }
 
@@ -959,20 +1002,69 @@ function showVideoOnTile(userId, track) {
   track.onmute = update; track.onunmute = update; update();
 }
 
-function showScreenTile(userId, track) {
+// Ekran yayını tile'ını oluşturur (kendi önizlemen ya da "İzle" ile açılan yayın).
+function createScreenTile(userId) {
   const u = getUser(userId);
-  let tile = $(`tile-screen-${userId}`);
-  if (!tile) {
-    tile = el('div', 'tile screen-tile');
-    tile.id = `tile-screen-${userId}`;
-    tile.innerHTML = `<video id="video-screen-${userId}" autoplay playsinline ${userId === appState.me.id ? 'muted' : ''}></video><div class="name-tag">${icon('screen')} ${escapeHtml(u.username)} — ekran</div>`;
-    $('voice-grid').appendChild(tile);
-  }
-  $(`video-screen-${userId}`).srcObject = new MediaStream([track]);
-  tile.style.display = 'flex';
-  track.onmute = () => { tile.style.display = 'none'; };
-  track.onunmute = () => { tile.style.display = 'flex'; };
+  const isSelf = userId === appState.me.id;
+  const tile = el('div', 'tile screen-tile');
+  tile.id = `tile-screen-${userId}`;
+  tile.innerHTML = `<video id="video-screen-${userId}" autoplay playsinline ${isSelf ? 'muted' : ''}></video>`
+    + `<div class="name-tag">${icon('screen')} ${escapeHtml(u.username)} — ekran${isSelf ? ' (sen)' : ''}</div>`
+    + `<div class="tile-actions">`
+    + (isSelf ? '' : `<button class="tile-close-btn" title="İzlemeyi durdur" aria-label="İzlemeyi durdur">${icon('close')}</button>`)
+    + `<button class="tile-fs-btn" title="Tam ekran (çift tıkla)" aria-label="Tam ekran">${icon('fullscreen')}</button>`
+    + `</div>`;
+  $('voice-grid').appendChild(tile);
+  const video = tile.querySelector('video');
+  tile.querySelector('.tile-fs-btn').addEventListener('click', (e) => { e.stopPropagation(); toggleTileFullscreen(tile); });
+  tile.querySelector('.tile-close-btn')?.addEventListener('click', (e) => { e.stopPropagation(); stopWatchingScreen(userId); });
+  video.addEventListener('dblclick', () => toggleTileFullscreen(tile));
+  return tile;
 }
+
+// Bir yayını izlemeye başla (tile'ı oluştur/göster ve saklı stream'i bağla).
+function openScreenWatch(userId) {
+  let tile = $(`tile-screen-${userId}`);
+  if (!tile) tile = createScreenTile(userId);
+  const video = $(`video-screen-${userId}`);
+  const stream = appState.voice.screenStreams.get(userId);
+  if (video && stream) video.srcObject = stream;
+  tile.style.display = 'flex';
+  setTimeout(() => {
+    tile.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    tile.classList.add('speaking');
+    setTimeout(() => tile.classList.remove('speaking'), 900);
+  }, 200);
+}
+
+// Bir yayını izlemeyi bırak (tile'ı kapat; yayın akmaya devam eder, sadece göstermeyiz).
+function stopWatchingScreen(userId) {
+  if (document.fullscreenElement === $(`tile-screen-${userId}`)) document.exitFullscreen?.();
+  const v = $(`video-screen-${userId}`); if (v) v.srcObject = null;
+  $(`tile-screen-${userId}`)?.remove();
+}
+
+// Bir tile'ı tam ekran yap / çık. Tam ekranda video object-fit: contain
+// kaldığı için yayın gerçek oranıyla tüm ekranı kaplar.
+function toggleTileFullscreen(tile) {
+  if (document.fullscreenElement === tile) {
+    document.exitFullscreen?.();
+  } else if (document.fullscreenElement) {
+    document.exitFullscreen?.().then(() => tile.requestFullscreen?.()).catch(() => {});
+  } else {
+    tile.requestFullscreen?.().catch((e) => console.warn('tam ekran hatası', e));
+  }
+}
+
+document.addEventListener('fullscreenchange', () => {
+  const fsEl = document.fullscreenElement;
+  for (const btn of document.querySelectorAll('.tile-fs-btn')) {
+    const tile = btn.closest('.tile');
+    const on = tile === fsEl;
+    tile?.classList.toggle('is-fullscreen', on);
+    btn.innerHTML = icon(on ? 'fullscreenExit' : 'fullscreen');
+  }
+});
 
 // =============================================================
 //  Ses kontrolleri (mikrofon / hoparlör / kamera / ekran / ayrıl)
@@ -982,7 +1074,7 @@ function applyMicEnabled() {
   let on;
   if (v.muted) on = false;
   else if (appState.mode === 'ptt') on = appState.pttActive;
-  else on = true;
+  else on = v.vadSpeaking === true; // VAD: gürültü kapısı — yalnızca konuşurken gönder
   media.setMicMuted(!on);
 }
 
@@ -991,12 +1083,14 @@ function toggleMute() {
   applyMicEnabled();
   updateVoiceButtons();
   broadcastVoiceState();
+  playSound(appState.voice.muted ? 'mute' : 'unmute');
 }
 
 function toggleSpeakerMute() {
   appState.voice.speakerMuted = !appState.voice.speakerMuted;
   for (const audio of appState.voice.audioEls.values()) audio.muted = appState.voice.speakerMuted;
   updateVoiceButtons();
+  playSound(appState.voice.speakerMuted ? 'deafen' : 'undeafen');
 }
 
 function updateVoiceButtons() {
@@ -1090,13 +1184,16 @@ async function startScreenShare(sourceId) {
   } catch (e) { alert('Ekran paylaşımı başlatılamadı: ' + e.message); return; }
 
   appState.voice.screenOn = true;
+  // Akıcılık ipucu: ekran içeriği için kodlayıcıya hareketi (fps) önceliklendir →
+  // mikro takılmaları azaltır. Track yakalandıktan sonra ayarlanır.
+  if (media.screenTrack) { try { media.screenTrack.contentHint = 'motion'; } catch {} }
   await mesh.updateTrack('screen');
-  showScreenTile(appState.me.id, media.screenTrack);
+  openScreenWatch(appState.me.id); // kendi önizlemen
   playSound('stream');
   media.screenTrack.onended = async () => {
     appState.voice.screenOn = false;
     await mesh.updateTrack('screen');
-    $(`tile-screen-${appState.me.id}`)?.remove();
+    stopWatchingScreen(appState.me.id);
     updateVoiceButtons(); broadcastVoiceState();
   };
   $('screen-modal').classList.add('hidden');
@@ -1126,6 +1223,11 @@ function onVoicePeerState({ channelId, userId, state }) {
   if (isRemote && shouldNotify) {
     if (!previous.screenOn && next.screenOn) playSound('stream');
     if (!previous.camOn && next.camOn) playSound('camera');
+  }
+  // Yayın durduysa izleme tile'ını kapat (kullanıcı yeniden İzle'ye basabilir).
+  if (isRemote && previous.screenOn && !next.screenOn) {
+    appState.voice.screenStreams.delete(userId);
+    stopWatchingScreen(userId);
   }
   rememberVoiceState(userId, state);
   if (channelId === appState.voice.channelId) applyPeerBadges(userId, state);
@@ -1192,19 +1294,46 @@ function wireGateway() {
   g.on('member-updated', ({ guildId, member }) => { updateCachedMember(member); if (member.id === appState.me.id) { appState.me = cacheUser({ ...appState.me, ...member }); $('up-name').textContent = appState.me.username; renderAvatar($('up-avatar'), appState.me); } if (guildId === appState.currentGuildId) { renderMemberSidebar(); renderServerSettingsMembers(); renderChannelList(); } });
   g.on('member-left', ({ guildId, userId }) => { const gu = appState.guilds.get(guildId); if (gu) { gu.members = gu.members.filter((m) => m.id !== userId); if (guildId === appState.currentGuildId) renderMemberSidebar(); } });
   g.on('guild-deleted', ({ guildId }) => { appState.guilds.delete(guildId); if (appState.currentGuildId === guildId) { appState.currentGuildId = null; showWelcome(); } renderGuildRail(); });
-  g.on('presence-sync', ({ guilds, activities }) => {
+  g.on('presence-sync', ({ guilds, activities, voice, statuses }) => {
     appState.onlineUsers.clear();
     appState.activities.clear();
+    appState.idleUsers.clear();
     for (const ids of Object.values(guilds || {})) for (const id of ids) appState.onlineUsers.add(id);
     for (const byUser of Object.values(activities || {})) {
       for (const [userId, activity] of Object.entries(byUser || {})) {
         if (activity) appState.activities.set(userId, activity);
       }
     }
+    for (const byUser of Object.values(statuses || {})) {
+      for (const [userId, status] of Object.entries(byUser || {})) {
+        if (status === 'idle') appState.idleUsers.add(userId);
+      }
+    }
+    // Yeniden bağlandıysak ve hâlâ AFK'ysek durumu sunucuya tekrar bildir
+    // (powerMonitor yalnızca değişimde tetiklenir, reconnect'te tetiklenmez).
+    if (appState.myIdle && appState.me?.id) {
+      appState.idleUsers.add(appState.me.id);
+      window.gateway?.send({ type: 'status-update', status: 'idle' });
+    }
+    // Ses kanallarının mevcut doluluğu — kanala girmeden de kimin nerede
+    // olduğunu görebilmek için ilk açılışta senkronla.
+    for (const byChannel of Object.values(voice || {})) {
+      for (const [channelId, members] of Object.entries(byChannel || {})) {
+        const ids = [];
+        for (const m of members || []) {
+          ids.push(m.userId);
+          if (m.state) appState.voiceStates.set(m.userId, m.state);
+        }
+        if (ids.length) appState.voicePresence.set(channelId, ids);
+        else appState.voicePresence.delete(channelId);
+      }
+    }
+    renderChannelList();
     renderMemberSidebar();
   });
-  g.on('member-presence', ({ userId, online }) => { if (online) appState.onlineUsers.add(userId); else { appState.onlineUsers.delete(userId); appState.activities.delete(userId); } renderMemberSidebar(); });
+  g.on('member-presence', ({ userId, online }) => { if (online) appState.onlineUsers.add(userId); else { appState.onlineUsers.delete(userId); appState.activities.delete(userId); appState.idleUsers.delete(userId); } renderMemberSidebar(); });
   g.on('member-activity', ({ userId, activity }) => { if (activity) appState.activities.set(userId, activity); else appState.activities.delete(userId); renderMemberSidebar(); });
+  g.on('member-status', ({ userId, status }) => { if (status === 'idle') appState.idleUsers.add(userId); else appState.idleUsers.delete(userId); renderMemberSidebar(); });
 
   // Ses presence (sidebar doluluk)
   g.on('voice-presence', ({ channelId, members }) => {
@@ -1232,7 +1361,7 @@ function wireGateway() {
 mesh.onRemoteTrack = handleRemoteTrack;
 mesh.onRemoteTrackEnded = (userId, type) => {
   if (type === 'camera') { const v = $(`video-voice-${userId}`); if (v) v.style.display = 'none'; const a = $(`tile-voice-${userId}`)?.querySelector('.avatar-big'); if (a) a.style.display = 'flex'; }
-  if (type === 'screen') { rememberVoiceState(userId, { screenOn: false }); $(`tile-screen-${userId}`)?.remove(); renderMemberSidebar(); }
+  if (type === 'screen') { appState.voice.screenStreams.delete(userId); rememberVoiceState(userId, { screenOn: false }); stopWatchingScreen(userId); renderMemberSidebar(); }
 };
 mesh.onStats = (userId, { rttMs }) => { appState.voice.pings.set(userId, rttMs); const t = $(`tileping-${userId}`); if (t) t.textContent = `${rttMs} ms`; recomputePing(); };
 
@@ -1240,6 +1369,7 @@ mesh.onStats = (userId, { rttMs }) => { appState.voice.pings.set(userId, rttMs);
 //  Konuşma algılama (VAD) → yeşil çerçeve
 // =============================================================
 const vadCtx = new Map();
+const VAD_HOLD_MS = 350; // konuşma bitince yeşil/kapı bu kadar açık kalır → titremez
 function startVAD(stream, userId) {
   stopVAD(userId);
   if (!stream || stream.getAudioTracks().length === 0) return;
@@ -1249,16 +1379,28 @@ function startVAD(stream, userId) {
   analyser.fftSize = 512;
   src.connect(analyser);
   const data = new Uint8Array(analyser.fftSize);
+  const isSelf = userId === appState.me.id;
   let raf;
+  let speaking = false;
+  let lastAbove = 0;
   const loop = () => {
     analyser.getByteTimeDomainData(data);
     const db = voiceLevelFromData(data);
     const threshold = clampNumber(window.Store.get('vadThresholdDb'), -80, -20, -55);
-    const isSelf = userId === appState.me.id;
     const micActive = !isSelf || (!appState.voice.muted && (appState.mode !== 'ptt' || appState.pttActive));
-    const speaking = db > threshold && micActive;
-    $(`tile-voice-${userId}`)?.classList.toggle('speaking', speaking);
-    $(`occ-${userId}`)?.classList.toggle('speaking', speaking);
+    const now = performance.now();
+    const above = db > threshold;
+    if (above) lastAbove = now;
+    // Eşiğin altına inse de kısa süre "konuşuyor" say → heceler arası titremeyi önler
+    const heard = above || (now - lastAbove) < VAD_HOLD_MS;
+    const next = micActive && heard;
+    if (next !== speaking) {
+      speaking = next;
+      $(`tile-voice-${userId}`)?.classList.toggle('speaking', speaking);
+      $(`occ-${userId}`)?.classList.toggle('speaking', speaking);
+      // Kendi mikrofonumuz + VAD modu: yalnızca konuşurken gönder (gürültü kapısı)
+      if (isSelf && appState.mode !== 'ptt') { appState.voice.vadSpeaking = speaking; applyMicEnabled(); }
+    }
     raf = requestAnimationFrame(loop);
   };
   loop();
@@ -1448,9 +1590,11 @@ $('btn-save-server-settings').addEventListener('click', async () => {
     renderGuildRail();
     renderChannelList();
     renderMemberSidebar();
-    $('server-settings-modal').classList.add('hidden');
+    closeModal('server-settings-modal');
+    toast('Sunucu ayarları kaydedildi');
   } catch (e) {
     $('server-settings-error').textContent = e.message;
+    toast(e.message || 'Sunucu ayarları kaydedilemedi', 'error');
   } finally {
     $('btn-save-server-settings').disabled = false;
   }
@@ -1473,7 +1617,8 @@ document.querySelectorAll('.st-tab').forEach((t) => t.addEventListener('click', 
 
 function setSettingsTab(tab) {
   document.querySelectorAll('.st-tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === tab));
-  for (const p of ['profile', 'devices', 'voice', 'keys']) $(`st-${p}`).classList.toggle('hidden', p !== tab);
+  for (const p of ['profile', 'devices', 'voice', 'keys', 'general']) $(`st-${p}`).classList.toggle('hidden', p !== tab);
+  if (tab === 'general') syncAutoLaunch();
   if (tab === 'voice') {
     startVoiceLevelMeter().catch((e) => {
       console.warn('Ses seviyesi ölçülemedi:', e);
@@ -1507,6 +1652,7 @@ function syncSettingsUI() {
   document.querySelectorAll('input[name="voice-mode"]').forEach((r) => { r.checked = r.value === appState.mode; });
   $('ptt-key-display').textContent = window.Store.get('pttKeyLabel') || window.Store.get('pttKey');
   $('chk-activity-enabled').checked = !!window.Store.get('activityEnabled');
+  $('chk-noise-suppression').checked = window.Store.get('noiseSuppression') !== false;
   syncVoiceTuneLabels();
 }
 
@@ -1554,14 +1700,17 @@ $('btn-save-profile').addEventListener('click', async () => {
     renderMemberSidebar();
     renderChannelList();
     if (appState.currentTextChannelId) renderMessages(appState.currentTextChannelId);
+    closeModal('settings-modal');
+    toast('Profil kaydedildi');
   } catch (e) {
     $('profile-error').textContent = e.message;
+    toast(e.message || 'Profil kaydedilemedi', 'error');
   } finally {
     $('btn-save-profile').disabled = false;
   }
 });
 
-$('sel-mic').addEventListener('change', async (e) => { window.Store.set('micId', e.target.value); if (appState.voice.connected) { await media.startMic(e.target.value); applyMicEnabled(); await mesh.updateTrack('mic'); startVAD(media.micStream, appState.me.id); } });
+$('sel-mic').addEventListener('change', async (e) => { window.Store.set('micId', e.target.value); if (appState.voice.connected) { await media.startMic(e.target.value); applyMicEnabled(); await mesh.updateTrack('mic'); startVAD(media.rawMicStream || media.micStream, appState.me.id); } });
 $('sel-speaker').addEventListener('change', async (e) => { window.Store.set('speakerId', e.target.value); media.setOutputDevice(e.target.value); for (const a of appState.voice.audioEls.values()) await media.applySinkId(a); });
 $('sel-camera').addEventListener('change', async (e) => { window.Store.set('cameraId', e.target.value); if (appState.voice.camOn) { const profile = window.CONFIG.qualityProfiles[window.Store.get('profileKey')]; await media.startCamera(e.target.value, profile.cameraHeight); await mesh.updateTrack('camera'); showVideoOnTile(appState.me.id, media.cameraTrack); } });
 $('sel-profile').addEventListener('change', async (e) => { window.Store.set('profileKey', e.target.value); updateProfileHint(); if (appState.voice.connected) await mesh.setProfile(window.CONFIG.qualityProfiles[e.target.value]); });
@@ -1582,6 +1731,31 @@ $('range-output-volume').addEventListener('input', (e) => {
   syncVoiceTuneLabels();
 });
 $('chk-activity-enabled').addEventListener('change', (e) => { window.Store.set('activityEnabled', e.target.checked); publishDesktopActivity(true); });
+
+// Gürültü azaltma toggle — anında uygula (gerekirse mikrofonu yeni ayarla yeniden başlat)
+$('chk-noise-suppression').addEventListener('change', async (e) => {
+  window.Store.set('noiseSuppression', e.target.checked);
+  if (appState.voice.connected) {
+    try {
+      await media.startMic(window.Store.get('micId'));
+      applyMicEnabled();
+      await mesh.updateTrack('mic');
+      startVAD(media.rawMicStream || media.micStream, appState.me.id);
+    } catch (err) { console.warn('Mikrofon yeniden başlatılamadı:', err); }
+  }
+});
+
+// --- Windows ile başlat (oturum açılış öğesi) ---
+async function syncAutoLaunch() {
+  const chk = $('chk-auto-launch');
+  if (!chk || !window.system) return;
+  try { chk.checked = await window.system.getAutoLaunch(); } catch {}
+}
+$('chk-auto-launch')?.addEventListener('change', async (e) => {
+  if (!window.system) return;
+  const applied = await window.system.setAutoLaunch(e.target.checked);
+  e.target.checked = !!applied; // OS gerçek durumunu yansıt
+});
 document.querySelectorAll('input[name="voice-mode"]').forEach((r) => r.addEventListener('change', () => { if (r.checked) { appState.mode = r.value; window.Store.set('voiceMode', r.value); applyModeUI(); if (appState.voice.connected) { applyMicEnabled(); if (r.value === 'ptt') startPTTIfNeeded(); else stopPTT(); } } }));
 
 function applyModeUI() { /* ileride mod rozetleri vb. */ }

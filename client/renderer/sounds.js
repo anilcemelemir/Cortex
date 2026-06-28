@@ -69,6 +69,25 @@
     if (name === 'camera') {
       tone(audio, { freq: 880, duration: 0.055, gain: 0.2, type: 'sine' });
       tone(audio, { at: 0.055, freq: 1175, duration: 0.08, gain: 0.24, type: 'triangle' });
+      return;
+    }
+    if (name === 'mute') {
+      tone(audio, { freq: 520, to: 300, duration: 0.085, gain: 0.3, type: 'sine' });
+      return;
+    }
+    if (name === 'unmute') {
+      tone(audio, { freq: 300, to: 540, duration: 0.085, gain: 0.3, type: 'sine' });
+      return;
+    }
+    if (name === 'deafen') {
+      tone(audio, { freq: 460, to: 220, duration: 0.075, gain: 0.28, type: 'sine' });
+      tone(audio, { at: 0.07, freq: 300, to: 180, duration: 0.09, gain: 0.24, type: 'sine' });
+      return;
+    }
+    if (name === 'undeafen') {
+      tone(audio, { freq: 240, to: 400, duration: 0.075, gain: 0.26, type: 'sine' });
+      tone(audio, { at: 0.07, freq: 420, to: 600, duration: 0.09, gain: 0.26, type: 'sine' });
+      return;
     }
   }
 

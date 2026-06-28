@@ -202,6 +202,7 @@ input, select, button { font-family: inherit; }
 .member-meta { margin-top: 2px; font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .member-status { width: 8px; height: 8px; border-radius: 50%; background: #6d737d; flex-shrink: 0; }
 .member-status.online { background: var(--green); }
+.member-status.idle { background: #f0b232; }
 .watch-btn { border: none; border-radius: 5px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; padding: 5px 7px; cursor: pointer; flex-shrink: 0; }
 .watch-btn:hover { background: var(--accent-hover); }
 .channel-header {
@@ -334,6 +335,20 @@ input, select, button { font-family: inherit; }
 .tile .badge.muted { background: var(--red); }
 .tile .tile-ping { position: absolute; right: 10px; bottom: 10px; background: rgba(0,0,0,.6); padding: 3px 8px; border-radius: 6px; font-size: 11px; color: var(--text-dim); }
 .tile.screen-tile { aspect-ratio: auto; grid-column: 1 / -1; max-height: 70vh; }
+.tile .tile-actions { position: absolute; right: 10px; top: 10px; display: flex; gap: 6px; opacity: 0; transition: opacity .15s; }
+.tile .tile-actions button {
+  width: 32px; height: 32px; padding: 6px;
+  border: none; border-radius: 7px; background: rgba(0,0,0,.55); color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; transition: background .15s;
+}
+.tile .tile-actions button:hover { background: rgba(0,0,0,.8); }
+.tile .tile-actions .tile-close-btn:hover { background: var(--red); }
+.tile .tile-actions .app-icon { width: 18px; height: 18px; }
+.tile.screen-tile:hover .tile-actions { opacity: 1; }
+.tile.is-fullscreen { max-height: none; border-radius: 0; border: none; }
+.tile.is-fullscreen video { object-fit: contain; }
+.tile.is-fullscreen .tile-actions { opacity: 1; }
+.tile.is-fullscreen .name-tag { left: 16px; bottom: 16px; }
 
 .voice-controls { height: 76px; display: flex; align-items: center; justify-content: center; gap: 12px; }
 .vc-btn { width: 50px; height: 50px; border-radius: 25px; border: none; background: var(--bg-3); color: var(--text); cursor: pointer; font-size: 20px; display: flex; align-items: center; justify-content: center; transition: background .12s; }
@@ -432,3 +447,23 @@ input, select, button { font-family: inherit; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: #1a1b1e; border-radius: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* --- Bildirimler (toast) --- */
+.toast-container {
+  position: fixed; bottom: 20px; right: 20px; z-index: 2000;
+  display: flex; flex-direction: column; gap: 10px; align-items: flex-end; pointer-events: none;
+}
+.toast {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-3); color: var(--text, #dbdee1);
+  border-left: 3px solid var(--accent); border-radius: 8px;
+  padding: 12px 16px; min-width: 220px; max-width: 360px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.4); font-size: 14px; font-weight: 500;
+  opacity: 0; transform: translateY(8px); transition: opacity .18s ease, transform .18s ease;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.success { border-left-color: var(--green); }
+.toast.error { border-left-color: var(--red); }
+.toast .toast-icon { width: 18px; height: 18px; flex-shrink: 0; }
+.toast.success .toast-icon { color: var(--green); }
+.toast.error .toast-icon { color: var(--red); }

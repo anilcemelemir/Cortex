@@ -15,6 +15,8 @@
     plus: `<path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/>`,
     menu: `<path d="M7 9.5h10L12 15z" fill="currentColor"/>`,
     close: `<path d="M7 7l10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>`,
+    check: `<path d="M5 12.5 10 17.5 19 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`,
+    warn: `<path d="M12 4 21 19H3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v4M12 16.5v.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`,
     mic: `<path d="M9 7a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6.5 11.5a5.5 5.5 0 0 0 11 0M12 17v3M9 20h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`,
     micOff: `<path d="M9 7a3 3 0 0 1 5.4-1.8M15 9.4V12a3 3 0 0 1-4.7 2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6.5 11.5a5.5 5.5 0 0 0 8.8 4.4M17.5 11.5a5.5 5.5 0 0 1-.7 2.7M12 17v3M9 20h6M4.8 4.8l14.4 14.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`,
     speaker: `<path d="M4.5 9.5h3.3L12 6v12l-4.2-3.5H4.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M15.3 9a4.6 4.6 0 0 1 0 6M17.7 6.7a8 8 0 0 1 0 10.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`,
@@ -30,7 +32,9 @@
     file: `<path d="M7 4.5h6l4 4v11H7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M13 4.5v4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>`,
     crown: `<path d="M5 17.5h14l1-9-4.3 3.1L12 5.5l-3.7 6.1L4 8.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M7 20h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`,
     trash: `<path d="M6.5 8h11M10 8V6h4v2M8 8l.8 12h6.4L16 8M10.5 11v6M13.5 11v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
-    live: `<path d="M5.5 7.5h13v8h-13zM9.3 19h5.4M12 15.5V19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="17.4" cy="8.5" r="1.6" fill="currentColor"/>`
+    live: `<path d="M5.5 7.5h13v8h-13zM9.3 19h5.4M12 15.5V19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="17.4" cy="8.5" r="1.6" fill="currentColor"/>`,
+    fullscreen: `<path d="M4 9V5.5a1.5 1.5 0 0 1 1.5-1.5H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
+    fullscreenExit: `<path d="M9 4v3.5A1.5 1.5 0 0 1 7.5 9H4M20 9h-3.5A1.5 1.5 0 0 1 15 7.5V4M15 20v-3.5a1.5 1.5 0 0 1 1.5-1.5H20M4 15h3.5A1.5 1.5 0 0 1 9 16.5V20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`
   };
 
   function svg(name, cls = 'app-icon') {

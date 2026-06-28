@@ -18,6 +18,14 @@ contextBridge.exposeInMainWorld('activity', {
   detect: () => ipcRenderer.invoke('activity-detect'),
 });
 
+contextBridge.exposeInMainWorld('system', {
+  // Windows ile başlat (oturum açılış öğesi) durumunu oku / ayarla
+  getAutoLaunch: () => ipcRenderer.invoke('auto-launch-get'),
+  setAutoLaunch: (enabled) => ipcRenderer.invoke('auto-launch-set', enabled),
+  // Sistem boşta (AFK) durumu değişince haber ver
+  onIdleChange: (cb) => ipcRenderer.on('idle-change', (e, idle) => cb(idle)),
+});
+
 // Global push-to-talk köprüsü
 contextBridge.exposeInMainWorld('ptt', {
   start: (code) => ipcRenderer.invoke('ptt-start', code),

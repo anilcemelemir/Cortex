@@ -7,13 +7,27 @@
 //   - Renderer ile güvenli IPC köprüsü kurmak (preload üzerinden)
 // =============================================================
 
-const { app, BrowserWindow, ipcMain, desktopCapturer, session } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, session, Tray, Menu, nativeImage, powerMonitor } = require('electron');
 const { execFile } = require('child_process');
 const path = require('path');
 const ptt = require('./ptt');
 
 let mainWindow;
+let tray = null;
+app.isQuitting = false;
+// --autostart ile açıldıysa (Windows oturum açılışı) pencereyi gösterme,
+// sessizce tepsiye in.
+const startHidden = process.argv.includes('--autostart');
 const APP_ICON = path.join(__dirname, '..', 'assets', 'icon.png');
+
+// Tek örnek: ikinci kez açılırsa (örn. tepsideyken kısayola tıklanırsa)
+// yeni pencere açma, mevcut olanı öne getir.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => showMainWindow());
+}
 const GAME_PROCESSES = new Map(Object.entries({
   'cs2': 'Counter-Strike 2',
   'csgo': 'Counter-Strike',
@@ -113,6 +127,7 @@ function createWindow() {
     darkTheme: true,
     title: 'Cortex',
     icon: APP_ICON,
+    show: false, // ready-to-show'da göster (autostart'ta gizli kalır)
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -121,6 +136,19 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  mainWindow.once('ready-to-show', () => {
+    if (!startHidden) mainWindow.show();
+  });
+
+  // Kapatma (X) → tepsiye in, uygulamayı arka planda çalışır tut.
+  // Gerçek çıkış yalnızca tepsi menüsü / app.quit ile olur.
+  mainWindow.on('close', (e) => {
+    if (!app.isQuitting) {
+      e.preventDefault();
+      mainWindow.hide();
+    }
+  });
 
   // Renderer konsolunu (uyarı/hata) terminale aktar — hata ayıklama için
   mainWindow.webContents.on('console-message', (e, level, message, line, source) => {
@@ -132,6 +160,48 @@ function createWindow() {
 
   // Geliştirme sırasında DevTools açmak istersen:
   // mainWindow.webContents.openDevTools({ mode: 'detach' });
+}
+
+// --- AFK / boşta tespiti (sistem genelinde, uygulama arkadayken bile) ---
+const AFK_THRESHOLD_SEC = 300; // 5 dk hareketsizlik → boşta
+let lastIdle = false;
+let idleTimer = null;
+function startIdleWatch() {
+  if (idleTimer) clearInterval(idleTimer);
+  idleTimer = setInterval(() => {
+    let idle = false;
+    try {
+      const state = powerMonitor.getSystemIdleState(AFK_THRESHOLD_SEC);
+      idle = state === 'idle' || state === 'locked';
+    } catch {}
+    if (idle !== lastIdle) {
+      lastIdle = idle;
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('idle-change', idle);
+    }
+  }, 15000);
+}
+
+function showMainWindow() {
+  if (!mainWindow) { createWindow(); return; }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function createTray() {
+  if (tray) return;
+  let image = nativeImage.createFromPath(APP_ICON);
+  if (!image.isEmpty()) image = image.resize({ width: 16, height: 16 });
+  tray = new Tray(image.isEmpty() ? APP_ICON : image);
+  tray.setToolTip('Cortex');
+  const menu = Menu.buildFromTemplate([
+    { label: 'Cortex\'i Aç', click: () => showMainWindow() },
+    { type: 'separator' },
+    { label: 'Çıkış', click: () => { app.isQuitting = true; app.quit(); } },
+  ]);
+  tray.setContextMenu(menu);
+  tray.on('click', () => showMainWindow());
+  tray.on('double-click', () => showMainWindow());
 }
 
 // --- Ekran paylaşımı izinlerini otomatik ver (kendi uygulamamız) ---
@@ -153,6 +223,8 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler(() => true);
 
   createWindow();
+  createTray();
+  startIdleWatch();
 
   // Global push-to-talk: tuş durumunu renderer'a ilet
   ptt.init((active) => {
@@ -161,19 +233,37 @@ app.whenReady().then(() => {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else showMainWindow();
   });
 });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+// Tepsiye inince pencere gizli kalır (kapanmaz) → uygulama arka planda yaşar.
+// Bu yüzden window-all-closed'da otomatik çıkış yapmıyoruz; çıkış tepsiden.
+app.on('window-all-closed', () => {});
 
+app.on('before-quit', () => { app.isQuitting = true; });
 app.on('will-quit', () => ptt.shutdown());
 
 // --- IPC: PTT kontrolü ---
 ipcMain.handle('ptt-start', (e, code) => ptt.start(code));
 ipcMain.handle('ptt-stop', () => { ptt.stop(); });
 ipcMain.handle('activity-detect', () => detectDesktopActivity());
+
+// --- IPC: Windows/işletim sistemi ile başlat (oturum açılış öğesi) ---
+ipcMain.handle('auto-launch-get', () => {
+  try { return app.getLoginItemSettings().openAtLogin; }
+  catch { return false; }
+});
+ipcMain.handle('auto-launch-set', (e, enabled) => {
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: !!enabled,
+      openAsHidden: false,
+      args: ['--autostart'],
+    });
+    return app.getLoginItemSettings().openAtLogin;
+  } catch { return false; }
+});
 
 // =============================================================
 //  IPC: Ekran/pencere kaynaklarını renderer'a ver
