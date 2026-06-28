@@ -1,0 +1,7 @@
+# Alan adını kendi domaininle değiştir. Caddy otomatik Let's Encrypt
+# sertifikası alır (HTTPS) ve WebSocket'i (/ws) sorunsuz proxy'ler.
+# DNS A kaydının VPS IP'sine baktığından emin ol.
+
+sesli.ornek-domain.com {
+    reverse_proxy app:8080
+}

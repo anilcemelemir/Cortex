@@ -1,0 +1,53 @@
+# =============================================================
+#  Cortex — sunucu yığını (VPS için)
+# =============================================================
+#  3 servis:
+#   - app    : Node backend (REST + WebSocket + SQLite)
+#   - caddy  : Otomatik HTTPS/WSS (Let's Encrypt) ters proxy
+#   - coturn : TURN sunucusu (NAT arkasındaki arkadaşlar için fallback)
+#
+#  Kullanım:
+#   1) Caddyfile içindeki alan adını kendi domaininle değiştir
+#   2) turnserver.conf içindeki realm + şifreyi değiştir
+#   3) .env dosyasına güçlü bir JWT_SECRET koy
+#   4) docker compose up -d
+# =============================================================
+
+services:
+  app:
+    build: ./server
+    restart: unless-stopped
+    environment:
+      - PORT=8080
+      - DATA_DIR=/data
+      - JWT_SECRET=${JWT_SECRET}
+    volumes:
+      - app-data:/data
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+  coturn:
+    image: coturn/coturn:latest
+    restart: unless-stopped
+    # TURN relay'inin UDP port aralığı host'ta açık olmalı; en kolayı host ağı.
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+
+volumes:
+  app-data:
+  caddy-data:
+  caddy-config:

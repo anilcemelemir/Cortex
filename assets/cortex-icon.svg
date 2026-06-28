@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Cortex icon">
+  <defs>
+    <linearGradient id="bg" x1="176" y1="96" x2="872" y2="928" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6b78ff"/>
+      <stop offset=".55" stop-color="#1fb7b4"/>
+      <stop offset="1" stop-color="#2478ff"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="300" y1="254" x2="734" y2="770" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#d7fffb"/>
+    </linearGradient>
+  </defs>
+  <rect x="84" y="84" width="856" height="856" rx="196" fill="url(#bg)"/>
+  <path d="M652 274a286 286 0 1 0 0 476" fill="none" stroke="url(#mark)" stroke-width="92" stroke-linecap="round"/>
+  <path d="M374 380h190l128 132-128 132H374" fill="none" stroke="#ffffff" stroke-width="68" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="356" cy="380" r="52" fill="#ffffff"/>
+  <circle cx="692" cy="512" r="52" fill="#ffffff"/>
+  <circle cx="356" cy="644" r="52" fill="#ffffff"/>
+</svg>

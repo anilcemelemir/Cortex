@@ -1,0 +1,17 @@
+{
+  "name": "discord-clone-server",
+  "version": "2.0.0",
+  "description": "Backend: hesaplar, sunucular/kanallar, text sohbet ve WebRTC signaling",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "ws": "^8.18.0"
+  }
+}

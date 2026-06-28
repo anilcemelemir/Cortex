@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob: mediastream:; connect-src 'self' ws: wss: http: https:;" />
+  <title>Cortex</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="window-titlebar">
+    <div class="window-titlebar-brand">
+      <img src="../../assets/icon.png" alt="" />
+      <span>Cortex</span>
+    </div>
+  </div>
+  <!-- ====================== GİRİŞ / KAYIT ====================== -->
+  <div id="auth-screen" class="auth-screen">
+    <div class="auth-card">
+      <div class="logo" data-icon="cortex"></div>
+      <h1 id="auth-title">Tekrar hoş geldin!</h1>
+      <p class="subtitle" id="auth-sub">Hesabınla giriş yap</p>
+
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-mode="login">Giriş</button>
+        <button class="auth-tab" data-mode="register">Kayıt Ol</button>
+      </div>
+
+      <label>Kullanıcı adı</label>
+      <input id="auth-username" type="text" autocomplete="username" placeholder="kullaniciadi" maxlength="20" />
+
+      <label>Şifre</label>
+      <input id="auth-password" type="password" autocomplete="current-password" placeholder="••••••••" />
+
+      <p class="auth-error" id="auth-error"></p>
+
+      <button id="auth-submit" class="btn-primary">Giriş Yap</button>
+
+      <details class="advanced">
+        <summary>Gelişmiş: Sunucu adresi</summary>
+        <input id="auth-server" type="text" placeholder="ws://localhost:8080" />
+        <p class="hint">Arkadaşlarınla kullanmak için kendi sunucunun adresi (örn. wss://sesli.site.com).</p>
+      </details>
+    </div>
+  </div>
+
+  <!-- ====================== UYGULAMA ====================== -->
+  <div id="app" class="app hidden">
+    <div class="layout">
+      <!-- Sunucu çubuğu (sol) -->
+      <nav class="guild-rail" id="guild-rail">
+        <button class="guild-btn home active" id="btn-home" title="Ana sayfa"><span data-icon="home"></span></button>
+        <div class="rail-sep"></div>
+        <div id="guild-list"></div>
+        <button class="guild-btn add" id="btn-add-guild" title="Sunucu ekle"><span data-icon="plus"></span></button>
+      </nav>
+
+      <!-- Kanal listesi -->
+      <aside class="sidebar">
+        <header class="guild-header" id="guild-header">
+          <span id="guild-header-name">Ana Sayfa</span>
+          <button class="guild-menu-btn" id="btn-guild-menu" title="Sunucu menüsü"><span data-icon="menu"></span></button>
+        </header>
+
+        <div class="channel-list" id="channel-list"></div>
+
+        <!-- Ses bağlantı durumu (bağlıyken görünür) -->
+        <div class="voice-status hidden" id="voice-status">
+          <div class="vs-info">
+            <span class="vs-ping-dot" id="vs-dot"></span>
+            <div class="vs-text">
+              <div class="vs-state" id="vs-state">Ses bağlı</div>
+              <div class="vs-channel" id="vs-channel"></div>
+            </div>
+          </div>
+          <button class="vs-disconnect" id="btn-disconnect" title="Sesten ayrıl"><span data-icon="close"></span></button>
+        </div>
+
+        <!-- Kullanıcı paneli -->
+        <div class="user-panel" id="user-panel">
+          <div class="up-user">
+            <div class="up-avatar" id="up-avatar">?</div>
+            <div class="up-name" id="up-name">—</div>
+          </div>
+          <div class="up-controls">
+            <button class="up-btn" id="btn-mic" title="Mikrofon"><span data-icon="mic"></span></button>
+            <button class="up-btn" id="btn-deafen" title="Hoparlörü sustur"><span data-icon="speaker"></span></button>
+            <button class="up-btn" id="btn-settings" title="Ayarlar"><span data-icon="settings"></span></button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Ana içerik -->
+      <main class="main" id="main">
+        <!-- Karşılama (hiçbir kanal seçili değilken) -->
+        <div class="welcome" id="welcome-view">
+          <div class="welcome-inner">
+            <div class="welcome-logo" data-icon="cortex"></div>
+            <h2>Cortex'e hoş geldin</h2>
+            <p>Soldan bir sunucu seç ya da yeni bir sunucu oluştur. Sunucu içinde text kanallarında yazış, ses kanallarına katılıp konuş.</p>
+            <button class="btn-primary narrow" id="btn-welcome-create">İlk sunucunu oluştur</button>
+          </div>
+        </div>
+
+        <!-- Text kanal görünümü -->
+        <section class="text-view hidden" id="text-view">
+          <header class="channel-header">
+            <span class="ch-hash" id="text-channel-icon" data-icon="hash"></span>
+            <span id="text-channel-name"></span>
+          </header>
+          <div class="messages" id="messages"></div>
+          <div class="typing" id="typing-indicator"></div>
+          <div class="composer">
+            <div class="attachment-tray hidden" id="attachment-tray"></div>
+            <div class="composer-box">
+              <button class="composer-attach" id="btn-attach-file" title="Dosya ekle"><span data-icon="attach"></span></button>
+              <textarea id="composer-input" maxlength="2000" placeholder="Mesaj yaz…" autocomplete="off" rows="1"></textarea>
+              <input id="file-input" type="file" multiple class="hidden" />
+            </div>
+          </div>
+        </section>
+
+        <!-- Ses sahne görünümü (video ızgarası) -->
+        <section class="voice-view hidden" id="voice-view">
+          <header class="channel-header voice">
+            <span class="ch-spk" data-icon="speaker"></span>
+            <span id="voice-channel-name"></span>
+            <div class="ping-display" id="ping-display" title="Ortalama gecikme">
+              <span class="ping-dot"></span><span id="ping-value">— ms</span>
+            </div>
+          </header>
+          <div class="voice-grid" id="voice-grid"></div>
+          <footer class="voice-controls">
+            <button class="vc-btn" id="vc-mic" title="Mikrofon"><span class="ico" data-icon="mic"></span></button>
+            <button class="vc-btn" id="vc-cam" title="Kamera"><span class="ico" data-icon="camera"></span></button>
+            <button class="vc-btn" id="vc-screen" title="Ekran paylaş"><span class="ico" data-icon="screen"></span></button>
+            <button class="vc-btn danger" id="vc-leave" title="Ayrıl"><span class="ico" data-icon="phone"></span></button>
+          </footer>
+        </section>
+      </main>
+
+      <aside class="member-sidebar hidden" id="member-sidebar">
+        <header class="member-head">Aktif Kullanıcılar</header>
+        <div class="member-list" id="member-list"></div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- ====================== MODALLAR ====================== -->
+  <!-- Sunucu ekle -->
+  <div id="add-guild-modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head"><h2>Sunucu</h2><button class="modal-close" data-close="add-guild-modal"><span data-icon="close"></span></button></div>
+      <div class="seg">
+        <button class="seg-btn active" data-seg="create">Oluştur</button>
+        <button class="seg-btn" data-seg="join">Katıl</button>
+      </div>
+      <div id="seg-create" class="seg-pane">
+        <label>Sunucu adı</label>
+        <input id="new-guild-name" type="text" maxlength="40" placeholder="örn. Oyun Grubu" />
+        <button class="btn-primary" id="btn-create-guild">Sunucu Oluştur</button>
+      </div>
+      <div id="seg-join" class="seg-pane hidden">
+        <label>Davet kodu</label>
+        <input id="join-code" type="text" placeholder="örn. x7Kp2Qzm" />
+        <button class="btn-primary" id="btn-join-guild">Katıl</button>
+      </div>
+      <p class="modal-error" id="add-guild-error"></p>
+    </div>
+  </div>
+
+  <!-- Kanal oluştur -->
+  <div id="add-channel-modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head"><h2>Kanal Oluştur</h2><button class="modal-close" data-close="add-channel-modal"><span data-icon="close"></span></button></div>
+      <label>Kanal türü</label>
+      <div class="type-choice">
+        <label class="type-opt"><input type="radio" name="ch-type" value="text" checked /> <span class="ch-hash">#</span> Text</label>
+        <label class="type-opt"><input type="radio" name="ch-type" value="code" /> <span class="ch-spk" data-icon="code"></span> Kod</label>
+        <label class="type-opt"><input type="radio" name="ch-type" value="voice" /> <span class="ch-spk" data-icon="speaker"></span> Ses</label>
+      </div>
+      <label>Kanal adı</label>
+      <input id="new-channel-name" type="text" maxlength="32" placeholder="yeni-kanal" />
+      <button class="btn-primary" id="btn-create-channel">Oluştur</button>
+      <p class="modal-error" id="add-channel-error"></p>
+    </div>
+  </div>
+
+  <!-- Sunucu menüsü (davet/sil/ayrıl) -->
+  <div id="guild-menu-modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head"><h2 id="gm-title">Sunucu</h2><button class="modal-close" data-close="guild-menu-modal"><span data-icon="close"></span></button></div>
+      <label>Davet kodu (arkadaşlarınla paylaş)</label>
+      <div class="invite-row">
+        <input id="gm-invite" type="text" readonly />
+        <button class="btn-secondary" id="btn-copy-invite">Kopyala</button>
+      </div>
+      <div class="gm-actions">
+        <button class="btn-secondary" id="btn-server-settings">Sunucu ayarları</button>
+        <button class="btn-secondary" id="btn-add-channel"><span data-icon="plus"></span> Kanal ekle</button>
+        <button class="btn-danger" id="btn-leave-guild">Sunucudan ayrıl</button>
+        <button class="btn-danger" id="btn-delete-guild">Sunucuyu sil</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="server-settings-modal" class="modal hidden">
+    <div class="modal-card wide">
+      <div class="modal-head"><h2>Sunucu Ayarları</h2><button class="modal-close" data-close="server-settings-modal"><span data-icon="close"></span></button></div>
+      <label>Sunucu adı</label>
+      <input id="server-settings-name" type="text" maxlength="40" />
+      <label>Davet kodu</label>
+        <div class="invite-row">
+          <input id="server-settings-invite" type="text" readonly />
+          <button class="btn-secondary" id="btn-server-settings-copy">Kopyala</button>
+        </div>
+      <label>Sunucu fotoğrafı</label>
+      <div class="image-setting">
+        <div class="image-preview guild-image-preview" id="server-image-preview"></div>
+        <div class="image-actions">
+          <input id="server-image-input" type="file" accept="image/png,image/jpeg,image/webp" class="hidden" />
+          <button class="btn-secondary" id="btn-upload-server-image">Fotoğraf seç</button>
+          <button class="btn-secondary" id="btn-remove-server-image">Kaldır</button>
+        </div>
+      </div>
+      <label>Üyeler</label>
+      <div class="settings-member-list" id="server-settings-members"></div>
+      <label>Kanallar</label>
+      <div class="settings-channel-list" id="server-settings-channels"></div>
+      <p class="modal-error" id="server-settings-error"></p>
+      <button class="btn-primary" id="btn-save-server-settings">Kaydet</button>
+    </div>
+  </div>
+
+  <!-- Ayarlar -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-card wide">
+      <div class="modal-head"><h2>Ayarlar</h2><button class="modal-close" data-close="settings-modal"><span data-icon="close"></span></button></div>
+
+      <div class="settings-tabs">
+        <button class="st-tab active" data-tab="profile">Profil</button>
+        <button class="st-tab" data-tab="devices">Cihazlar</button>
+        <button class="st-tab" data-tab="voice">Ses & Mod</button>
+        <button class="st-tab" data-tab="keys">Kısayollar</button>
+      </div>
+
+      <div class="st-pane" id="st-profile">
+        <div class="profile-settings">
+          <div class="profile-preview" id="profile-preview"></div>
+          <div class="profile-fields">
+            <label>Kullanıcı adı</label>
+            <input id="profile-username" type="text" maxlength="20" />
+            <label>Profil rengi</label>
+            <input id="profile-color" type="color" />
+            <label>Profil fotoğrafı</label>
+            <div class="image-actions">
+              <input id="profile-image-input" type="file" accept="image/png,image/jpeg,image/webp" class="hidden" />
+              <button class="btn-secondary" id="btn-upload-profile-image">Fotoğraf seç</button>
+              <button class="btn-secondary" id="btn-remove-profile-image">Kaldır</button>
+            </div>
+            <label class="inline-check"><input type="checkbox" id="chk-activity-enabled" /> Oyun ve Spotify durumunu göster</label>
+          </div>
+        </div>
+        <p class="modal-error" id="profile-error"></p>
+        <button class="btn-primary" id="btn-save-profile">Profili Kaydet</button>
+      </div>
+
+      <div class="st-pane hidden" id="st-devices">
+        <label>Mikrofon (giriş)</label>
+        <select id="sel-mic"></select>
+        <label>Hoparlör (çıkış)</label>
+        <select id="sel-speaker"></select>
+        <label>Kamera</label>
+        <select id="sel-camera"></select>
+      </div>
+
+      <div class="st-pane hidden" id="st-voice">
+        <label>Konuşma modu</label>
+        <div class="type-choice">
+          <label class="type-opt"><input type="radio" name="voice-mode" value="vad" /> Ses algılama</label>
+          <label class="type-opt"><input type="radio" name="voice-mode" value="ptt" /> Bas-konuş (PTT)</label>
+        </div>
+        <label>Kalite profili</label>
+        <select id="sel-profile"></select>
+        <p class="hint" id="settings-profile-hint"></p>
+        <div class="voice-tune">
+          <label>Mikrofon kazancı <span id="input-gain-label">0 dB</span></label>
+          <input id="range-input-gain" type="range" min="-20" max="20" step="1" />
+          <label>Aktivasyon eşiği <span id="vad-threshold-label">-55 dB</span></label>
+          <input id="range-vad-threshold" type="range" min="-80" max="-20" step="1" />
+          <label>Gelen ses <span id="output-volume-label">100%</span></label>
+          <input id="range-output-volume" type="range" min="0" max="200" step="5" />
+        </div>
+      </div>
+
+      <div class="st-pane hidden" id="st-keys">
+        <label>Bas-konuş (Push-to-Talk) tuşu</label>
+        <div class="key-row">
+          <div class="key-display" id="ptt-key-display">CapsLock</div>
+          <button class="btn-secondary" id="btn-rebind-ptt">Değiştir</button>
+        </div>
+        <p class="hint" id="ptt-hint">Bu tuşu basılı tuttuğun sürece konuşursun. Oyun açıkken bile çalışır (global kısayol).</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ekran paylaşım seçici -->
+  <div id="screen-modal" class="modal hidden">
+    <div class="modal-card wide">
+      <div class="modal-head"><h2>Ekran Paylaş</h2><button class="modal-close" data-close="screen-modal"><span data-icon="close"></span></button></div>
+      <div class="share-options">
+        <div class="opt-group">
+          <label>Çözünürlük</label>
+          <select id="sel-resolution">
+            <option value="720">1280×720 (HD)</option>
+            <option value="1080" selected>1920×1080 (Full HD)</option>
+            <option value="1440">2560×1440 (2K)</option>
+            <option value="2160">3840×2160 (4K)</option>
+          </select>
+        </div>
+        <div class="opt-group">
+          <label>FPS</label>
+          <select id="sel-fps"><option value="15">15</option><option value="30" selected>30</option><option value="60">60</option></select>
+        </div>
+        <div class="opt-group checkbox">
+          <label><input type="checkbox" id="chk-sysaudio" checked /> Sistem sesini paylaş</label>
+        </div>
+      </div>
+      <div class="source-tabs">
+        <button class="tab active" data-tab="screen">Tam Ekran</button>
+        <button class="tab" data-tab="window">Pencere</button>
+      </div>
+      <div id="source-list" class="source-list"><p class="loading">Kaynaklar yükleniyor…</p></div>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="store.js"></script>
+  <script src="api.js"></script>
+  <script src="gateway.js"></script>
+  <script src="media.js"></script>
+  <script src="voice.js"></script>
+  <script src="icons.js"></script>
+  <script src="sounds.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
