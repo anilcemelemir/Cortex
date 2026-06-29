@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld('activity', {
   detect: () => ipcRenderer.invoke('activity-detect'),
 });
 
+contextBridge.exposeInMainWorld('audio', {
+  // RNNoise WASM ikilisini (SIMD'e gore) main surecten oku
+  loadRnnoiseWasm: (simd) => ipcRenderer.invoke('load-rnnoise-wasm', simd),
+});
+
 contextBridge.exposeInMainWorld('system', {
   // Windows ile başlat (oturum açılış öğesi) durumunu oku / ayarla
   getAutoLaunch: () => ipcRenderer.invoke('auto-launch-get'),

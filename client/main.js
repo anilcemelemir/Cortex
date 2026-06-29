@@ -10,6 +10,7 @@
 const { app, BrowserWindow, ipcMain, desktopCapturer, session, Tray, Menu, nativeImage, powerMonitor } = require('electron');
 const { execFile } = require('child_process');
 const path = require('path');
+const fs = require('fs');
 const ptt = require('./ptt');
 
 let mainWindow;
@@ -248,6 +249,17 @@ app.on('will-quit', () => ptt.shutdown());
 ipcMain.handle('ptt-start', (e, code) => ptt.start(code));
 ipcMain.handle('ptt-stop', () => { ptt.stop(); });
 ipcMain.handle('activity-detect', () => detectDesktopActivity());
+
+// --- IPC: RNNoise WASM ikilisini diskten oku (renderer fetch(file://) güvenilmez) ---
+// renderer SIMD destegine gore dosyayi secer; ArrayBuffer dondururuz, worklet'e
+// processorOptions.wasmBinary olarak gecilir.
+ipcMain.handle('load-rnnoise-wasm', (e, simd) => {
+  const file = simd ? 'rnnoise_simd.wasm' : 'rnnoise.wasm';
+  const p = path.join(__dirname, 'renderer', 'vendor', 'rnnoise', file);
+  const buf = fs.readFileSync(p);
+  // Buffer -> bagimsiz ArrayBuffer (sadece ilgili bolge)
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+});
 
 // --- IPC: Windows/işletim sistemi ile başlat (oturum açılış öğesi) ---
 ipcMain.handle('auto-launch-get', () => {

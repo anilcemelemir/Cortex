@@ -14,7 +14,13 @@ class VoiceMesh {
     this.media = media;
     this.myUserId = null;
     this.channelId = null;
-    this.profile = null;
+    // Ekran paylaşımı kodlayıcı parametreleri (paylaşım başlatılırken güncellenir).
+    // maxBitrate = seçilen çözünürlük/fps'ten türetilir; degradationPreference
+    // 'maintain-resolution' (Net) varsayılan — yük altında fps düşer, çözünürlük korunur.
+    this.screenParams = {
+      maxBitrate: window.CONFIG.screenBitrate(1080, 30),
+      degradationPreference: 'maintain-resolution',
+    };
     this.peers = new Map(); // userId -> PeerConn
 
     // Dışa olaylar
@@ -57,10 +63,9 @@ class VoiceMesh {
     });
   }
 
-  async join(channelId, profile) {
+  async join(channelId) {
     this.myUserId = window.appState.me.id;
     this.channelId = channelId;
-    this.profile = profile;
     window.gateway.send({ type: 'join-voice', channelId });
   }
 
@@ -69,6 +74,13 @@ class VoiceMesh {
     for (const peer of this.peers.values()) peer.close();
     this.peers.clear();
     this.channelId = null;
+  }
+
+  // Yerel peer'leri kapat ama kanalda kalmaya devam et (sunucuya leave gönderme).
+  // WS reconnect sonrası ölü peer'leri temizleyip yeniden katılmak için kullanılır.
+  resetPeers() {
+    for (const peer of this.peers.values()) peer.close();
+    this.peers.clear();
   }
 
   _sendSignal(targetUserId, signal) {
@@ -89,8 +101,10 @@ class VoiceMesh {
     window.gateway.send({ type: 'voice-state', state });
   }
 
-  async setProfile(profile) {
-    this.profile = profile;
+  // Ekran paylaşımı parametrelerini güncelle (paylaşım başlatılırken çağrılır):
+  // { maxBitrate, degradationPreference }. Tüm aktif peer'lere uygula.
+  async setScreenParams(params) {
+    this.screenParams = { ...this.screenParams, ...params };
     for (const peer of this.peers.values()) await peer.applyBitrates();
   }
 }
@@ -115,6 +129,7 @@ class PeerConn {
       mic: this.pc.addTransceiver('audio', { direction: 'sendrecv' }),
       camera: this.pc.addTransceiver('video', { direction: 'sendrecv' }),
       screen: this.pc.addTransceiver('video', { direction: 'sendrecv' }),
+      screenAudio: this.pc.addTransceiver('audio', { direction: 'sendrecv' }),
     };
 
     this.remoteTrackMap = {};
@@ -133,7 +148,7 @@ class PeerConn {
       try {
         this.makingOffer = true;
         let offer = await this.pc.createOffer();
-        offer = { type: offer.type, sdp: mungeOpus(offer.sdp, this.mesh.profile.audioBitrate) };
+        offer = { type: offer.type, sdp: mungeOpus(offer.sdp, window.CONFIG.media.audioBitrate) };
         await this.pc.setLocalDescription(offer);
         this.mesh._sendSignal(this.userId, { sdp: this.pc.localDescription });
       } catch (e) {
@@ -195,6 +210,7 @@ class PeerConn {
     if (this.tx.mic.mid) map[this.tx.mic.mid] = 'mic';
     if (this.tx.camera.mid) map[this.tx.camera.mid] = 'camera';
     if (this.tx.screen.mid) map[this.tx.screen.mid] = 'screen';
+    if (this.tx.screenAudio.mid) map[this.tx.screenAudio.mid] = 'screenAudio';
     this.dc.send(JSON.stringify({ type: 'track-map', map }));
   }
 
@@ -206,6 +222,7 @@ class PeerConn {
     await this.applyTrack('mic');
     await this.applyTrack('camera');
     await this.applyTrack('screen');
+    await this.applyTrack('screenAudio');
     await this.applyBitrates();
   }
 
@@ -215,6 +232,7 @@ class PeerConn {
     if (type === 'mic') track = media.micTrack;
     else if (type === 'camera') track = media.cameraTrack;
     else if (type === 'screen') track = media.screenTrack;
+    else if (type === 'screenAudio') track = media.screenAudioTrack;
 
     const tx = this.tx[type];
     if (!tx) return;
@@ -225,19 +243,31 @@ class PeerConn {
   }
 
   async applyBitrates() {
-    const p = this.mesh.profile;
-    await this._setBitrate(this.tx.mic.sender, p.audioBitrate);
-    await this._setBitrate(this.tx.camera.sender, p.cameraBitrate);
-    // Ekran için kareyi koru (maintain-framerate): yük altında çözünürlüğü
-    // düşürür ama fps'i korur → izlerken mikro takılma/stutter azalır.
-    await this._setBitrate(this.tx.screen.sender, p.screenBitrate, 'maintain-framerate');
+    const media = window.CONFIG.media;
+    const screen = this.mesh.screenParams;
+    // Ses (mic ve sistem sesi) bant genişliğinde önceliklidir: ekran yayını
+    // upload'ı doyursa bile ses paketleri öne alınır → robotik/"derin" ses olmaz.
+    await this._setBitrate(this.tx.mic.sender, media.audioBitrate, { priority: 'high' });
+    await this._setBitrate(this.tx.screenAudio.sender, media.audioBitrate, { priority: 'high' });
+    await this._setBitrate(this.tx.camera.sender, media.cameraBitrate);
+    // Ekran: bitrate seçilen çözünürlük/fps'ten türetilir; degradationPreference
+    // kullanıcının Net/Akıcı seçimine göre gelir. Düşük öncelik → sesi ezmez.
+    await this._setBitrate(this.tx.screen.sender, screen.maxBitrate, {
+      degradationPreference: screen.degradationPreference,
+      priority: 'low',
+    });
   }
 
-  async _setBitrate(sender, maxBitrate, degradationPreference) {
+  async _setBitrate(sender, maxBitrate, opts = {}) {
     if (!sender) return;
+    const { degradationPreference, priority } = opts;
     const params = sender.getParameters();
     if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
     params.encodings[0].maxBitrate = maxBitrate;
+    if (priority) {
+      params.encodings[0].priority = priority;
+      params.encodings[0].networkPriority = priority;
+    }
     if (degradationPreference) params.degradationPreference = degradationPreference;
     try { await sender.setParameters(params); } catch (e) {}
   }
@@ -254,13 +284,13 @@ class PeerConn {
 
         let desc = signal.sdp;
         if (desc.type === 'offer' || desc.type === 'answer') {
-          desc = { type: desc.type, sdp: mungeOpus(desc.sdp, this.mesh.profile.audioBitrate) };
+          desc = { type: desc.type, sdp: mungeOpus(desc.sdp, window.CONFIG.media.audioBitrate) };
         }
         await this.pc.setRemoteDescription(desc);
 
         if (signal.sdp.type === 'offer') {
           let answer = await this.pc.createAnswer();
-          answer = { type: answer.type, sdp: mungeOpus(answer.sdp, this.mesh.profile.audioBitrate) };
+          answer = { type: answer.type, sdp: mungeOpus(answer.sdp, window.CONFIG.media.audioBitrate) };
           await this.pc.setLocalDescription(answer);
           this.mesh._sendSignal(this.userId, { sdp: this.pc.localDescription });
         }

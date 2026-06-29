@@ -13,7 +13,7 @@ const defaults = {
   micId: null,
   speakerId: null,
   cameraId: null,
-  profileKey: window.CONFIG.defaultProfile,
+  screenMode: 'net',       // ekran paylaşımı önceliği: 'net' (çözünürlük) | 'akici' (fps)
   voiceMode: 'vad',        // 'vad' (ses algılama) | 'ptt' (bas-konuş)
   noiseSuppression: true,  // mikrofon gürültü azaltma (tarayıcı/Chromium)
   pttKey: 'CapsLock',      // push-to-talk tuşu (varsayılan)

@@ -1,0 +1,11 @@
+RNNoise gürültü bastırma dosyaları (workletProcessor.js, rnnoise.wasm,
+rnnoise_simd.wasm) @sapphi-red/web-noise-suppressor (MIT) projesinden
+vendor'lanmıştır.
+
+Kaynak: https://github.com/sapphi-red/web-noise-suppressor
+Lisans: MIT
+RNNoise: https://github.com/xiph/rnnoise (Xiph.Org, BSD)
+
+Bundler kullanmadığımız için dist dosyaları doğrudan kopyalanıp
+renderer'dan <audioWorklet.addModule> + IPC ile yüklenen wasm binary
+ile çalıştırılır. Dosyalar değiştirilmemiştir.

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob: mediastream:; connect-src 'self' ws: wss: http: https:;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob: mediastream:; connect-src 'self' ws: wss: http: https:;" />
   <title>Cortex</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -281,10 +281,7 @@
           <label class="type-opt"><input type="radio" name="voice-mode" value="vad" /> Ses algılama</label>
           <label class="type-opt"><input type="radio" name="voice-mode" value="ptt" /> Bas-konuş (PTT)</label>
         </div>
-        <label class="inline-check"><input type="checkbox" id="chk-noise-suppression" /> Gürültü azaltma (arka plan sesini bastır)</label>
-        <label>Kalite profili</label>
-        <select id="sel-profile"></select>
-        <p class="hint" id="settings-profile-hint"></p>
+        <label class="inline-check"><input type="checkbox" id="chk-noise-suppression" /> Gürültü azaltma (RNNoise — klavye, fan, arka plan sesini bastırır)</label>
         <div class="voice-tune">
           <label>Mikrofon kazancı <span id="input-gain-label">0 dB</span></label>
           <input id="range-input-gain" type="range" min="-20" max="20" step="1" />
@@ -336,6 +333,13 @@
         <div class="opt-group">
           <label>FPS</label>
           <select id="sel-fps"><option value="15">15</option><option value="30" selected>30</option><option value="60">60</option></select>
+        </div>
+        <div class="opt-group">
+          <label>Öncelik</label>
+          <select id="sel-screen-mode">
+            <option value="net" selected>Net (çözünürlük)</option>
+            <option value="akici">Akıcı (fps)</option>
+          </select>
         </div>
         <div class="opt-group checkbox">
           <label><input type="checkbox" id="chk-sysaudio" checked /> Sistem sesini paylaş</label>

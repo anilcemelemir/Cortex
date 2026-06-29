@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cortex indir</title>
+  <meta name="description" content="Cortex Windows kurulum dosyasini indir." />
+  <style>
+    :root {
+      --bg: #1e1f22;
+      --panel: #2b2d31;
+      --panel-2: #313338;
+      --text: #f2f3f5;
+      --muted: #b5bac1;
+      --dim: #949ba4;
+      --accent: #5865f2;
+      --green: #23a55a;
+      --border: #1f2023;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; font-family: Inter, "Segoe UI", Arial, sans-serif;
+      color: var(--text); background: var(--bg); display: flex; align-items: stretch;
+    }
+    .page {
+      width: 100%; min-height: 100vh; display: grid; grid-template-columns: minmax(320px, 1fr) minmax(360px, 520px);
+      background:
+        radial-gradient(circle at 22% 18%, rgba(88,101,242,.34), transparent 34%),
+        radial-gradient(circle at 72% 82%, rgba(31,183,180,.2), transparent 30%),
+        linear-gradient(135deg, #1e1f22, #20242c 52%, #1e1f22);
+    }
+    .hero { padding: 56px clamp(24px, 6vw, 92px); display: flex; flex-direction: column; justify-content: center; }
+    .brand { display: inline-flex; align-items: center; gap: 12px; color: var(--muted); font-size: 14px; font-weight: 800; }
+    .mark {
+      width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center;
+      background: linear-gradient(145deg, #6b78ff, #1fb7b4 58%, #2478ff);
+      box-shadow: 0 16px 32px rgba(31,183,180,.18);
+    }
+    .mark::before { content: "C"; font-weight: 900; font-size: 24px; color: #fff; }
+    h1 { margin: 34px 0 14px; font-size: clamp(42px, 7vw, 78px); line-height: .94; letter-spacing: 0; max-width: 740px; }
+    .lead { max-width: 660px; margin: 0; color: var(--muted); font-size: clamp(17px, 2vw, 21px); line-height: 1.55; }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
+    .btn {
+      min-height: 48px; border: 0; border-radius: 8px; padding: 0 18px; display: inline-flex; align-items: center; gap: 10px;
+      color: #fff; text-decoration: none; font-weight: 800; background: var(--accent); box-shadow: 0 14px 30px rgba(88,101,242,.24);
+    }
+    .btn:hover { background: #4752c4; }
+    .btn.secondary { background: rgba(255,255,255,.08); box-shadow: none; color: var(--text); border: 1px solid rgba(255,255,255,.08); }
+    .meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; color: var(--dim); font-size: 13px; }
+    .meta span { padding: 7px 9px; border-radius: 8px; background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.06); }
+    .side { background: rgba(43,45,49,.86); border-left: 1px solid rgba(255,255,255,.08); display: flex; align-items: center; padding: 32px; }
+    .panel { width: 100%; display: grid; gap: 14px; }
+    .status { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; }
+    .status strong { display: block; margin-bottom: 4px; }
+    .status small { color: var(--muted); }
+    .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 5px rgba(35,165,90,.16); flex-shrink: 0; }
+    .features { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .feature { min-height: 96px; padding: 14px; background: rgba(30,31,34,.72); border: 1px solid rgba(255,255,255,.06); border-radius: 8px; }
+    .feature b { display: block; margin-bottom: 8px; }
+    .feature p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.42; }
+    .note { margin: 2px 0 0; color: var(--dim); font-size: 12px; line-height: 1.5; }
+    @media (max-width: 860px) {
+      .page { grid-template-columns: 1fr; }
+      .hero { min-height: auto; padding-top: 40px; padding-bottom: 34px; }
+      .side { border-left: 0; border-top: 1px solid rgba(255,255,255,.08); }
+      .features { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="brand"><span class="mark" aria-hidden="true"></span><span>Cortex</span></div>
+      <h1>Arkadas grubun icin kendi sesli alanin.</h1>
+      <p class="lead">Cortex, Windows icin hazirlanan acik kaynakli sesli sohbet uygulamasi. Sunucuya katil, konus, ekran paylas, kod ve dosya gonder.</p>
+      <div class="actions">
+        <a class="btn" href="https://github.com/anilcemelemir/Cortex/releases/latest/download/Cortex-Kurulum.exe">Windows icin indir</a>
+        <a class="btn secondary" href="https://github.com/anilcemelemir/Cortex/releases/latest">Surum notlari</a>
+      </div>
+      <div class="meta">
+        <span>Windows 10/11</span>
+        <span>Otomatik HTTPS/WSS</span>
+        <span>WebRTC P2P</span>
+      </div>
+    </section>
+    <aside class="side">
+      <div class="panel">
+        <div class="status">
+          <div><strong>Son surum</strong><small>GitHub Releases uzerinden dagitilir.</small></div>
+          <span class="dot" aria-hidden="true"></span>
+        </div>
+        <div class="features">
+          <div class="feature"><b>Ses ve ekran</b><p>Dusuk gecikmeli ses, kamera, ekran paylasimi ve sistem sesi destegi.</p></div>
+          <div class="feature"><b>Sunucular</b><p>Davet kodu, kanal yonetimi, aktif kullanicilar ve sahip rozetleri.</p></div>
+          <div class="feature"><b>Kod kanali</b><p>Kod renklendirme, hizli kopyalama ve dosya paylasimi.</p></div>
+          <div class="feature"><b>Acik kaynak</b><p>Kendi VPS'inde kur, degistir, arkadaslarinla kullan.</p></div>
+        </div>
+        <p class="note">Indirme linki her zaman en yeni GitHub Release dosyasina gider. Guvenlik icin installer'i yalnizca bu sayfadan veya resmi GitHub reposundan indir.</p>
+      </div>
+    </aside>
+  </main>
+</body>
+</html>

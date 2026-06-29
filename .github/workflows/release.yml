@@ -1,0 +1,60 @@
+name: Release Windows Installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, for example 1.2.0
+        required: true
+        default: 1.2.0
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install client dependencies
+        run: npm ci
+        working-directory: client
+
+      - name: Inject TURN config
+        run: node scripts/inject-turn-config.js
+        working-directory: client
+        env:
+          CORTEX_TURN_URL: ${{ secrets.CORTEX_TURN_URL }}
+          CORTEX_TURN_USERNAME: ${{ secrets.CORTEX_TURN_USERNAME }}
+          CORTEX_TURN_CREDENTIAL: ${{ secrets.CORTEX_TURN_CREDENTIAL }}
+
+      - name: Build Windows installer
+        run: npm run dist
+        working-directory: client
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cortex-Kurulum
+          path: client/dist/Cortex-Kurulum.exe
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
+          name: Cortex ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+          files: client/dist/Cortex-Kurulum.exe
+          generate_release_notes: true

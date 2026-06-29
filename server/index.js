@@ -16,6 +16,7 @@ const api = require('./api');
 const realtime = require('./realtime');
 
 const PORT = process.env.PORT || 8080;
+const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const app = express();
 app.use(express.json({ limit: '32mb' }));
@@ -33,6 +34,10 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 
 app.use('/api/auth', auth.router);
 app.use('/api', api.router);
+
+app.use(express.static(PUBLIC_DIR, { extensions: ['html'] }));
+app.get('/', (req, res) => res.redirect('/indir'));
+app.get('/indir', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'indir', 'index.html')));
 
 app.use((req, res) => res.status(404).json({ error: 'Bulunamadı' }));
 // Hata yakalayıcı

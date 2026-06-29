@@ -22,6 +22,18 @@ Client canli endpoint:
 wss://cortexapp.web.tr
 ```
 
+Kullanici indirme sayfasi:
+
+```text
+https://cortexapp.web.tr/indir
+```
+
+Direkt installer linki:
+
+```text
+https://github.com/anilcemelemir/Cortex/releases/latest/download/Cortex-Kurulum.exe
+```
+
 Client tarafinda kullanici sunucu adresini elle secmez. Kurulum dosyasindan gelen uygulama kod icindeki endpoint'e baglanir.
 
 ## 1. Satin Alma Kontrol Listesi
@@ -442,10 +454,60 @@ npm run dist
 Cikti:
 
 ```text
-client/dist/Cortex-Kurulum-1.0.0.exe
+client/dist/Cortex-Kurulum.exe
 ```
 
 Bu dosyayi kurup test et.
+
+## 14.1 GitHub Release ile Installer Yayinla
+
+Kalici indirme linkinin calismasi icin GitHub Releases tarafinda
+`Cortex-Kurulum.exe` asset'i olmalidir.
+
+Repo > Settings > Secrets and variables > Actions > Secrets altina sunlari ekle:
+
+```text
+CORTEX_TURN_URL=turn:cortexapp.web.tr:3478
+CORTEX_TURN_USERNAME=turnkullanici
+CORTEX_TURN_CREDENTIAL=TURN_SIFRESI
+```
+
+Sonra GitHub > Actions > Release Windows Installer > Run workflow:
+
+```text
+version = 1.2.0
+```
+
+Workflow Windows runner'da installer uretir ve GitHub Release'e su dosyayi ekler:
+
+```text
+Cortex-Kurulum.exe
+```
+
+Kalici link:
+
+```text
+https://github.com/anilcemelemir/Cortex/releases/latest/download/Cortex-Kurulum.exe
+```
+
+Domain sayfasi:
+
+```text
+https://cortexapp.web.tr/indir
+```
+
+Bu sayfadaki buton da ayni latest release dosyasina gider.
+
+Alternatif olarak tag push ile release tetikleyebilirsin:
+
+```bash
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+Onemli: Eski TURN sifresi public commit gecmisinde gorunmus olabilir. Canliya
+cikmadan once TURN_SIFRESI'ni mutlaka degistir, GitHub Secret'a yeni sifreyi koy
+ve VPS'teki `turnserver.conf` dosyasini da ayni yeni sifreyle guncelle.
 
 ## 15. Ilk Canli Test Senaryosu
 
@@ -752,4 +814,3 @@ TURN_SIFRESI
 SSH private key
 GitHub secret degerleri
 ```
-

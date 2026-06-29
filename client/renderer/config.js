@@ -18,36 +18,29 @@ window.CONFIG = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    // Kendi TURN'un (deploy rehberindeki coturn). NAT fallback için.
-    {
-      urls: 'turn:cortexapp.web.tr:3478',
-      username: 'turnkullanici',
-      credential: 'vqcWuFnNFGF/3xJofhWdOYGSiPQ9tRwtORnzx23GKJ0=',
-    },
+    // Release build sirasinda GitHub Secret ile TURN eklenir.
+    // Public repo'ya gercek TURN sifresi commit etme.
   ],
 
   // =============================================================
-  //  PING-DOSTU KALİTE PROFİLLERİ
-  //  Upload bitrate tavanı = bufferbloat yok = oyun ping'i etkilenmez.
+  //  SABİT MEDYA AYARLARI
+  //  Ses her zaman önceliklidir ve sabittir; ekran kalitesi tek yerden
+  //  (Ekran Paylaş modal'ındaki çözünürlük/fps seçimi) yönetilir.
   // =============================================================
-  qualityProfiles: {
-    dusuk: {
-      label: 'Düşük (oyun dostu)',
-      audioBitrate: 32_000, cameraBitrate: 400_000, screenBitrate: 1_500_000,
-      screenFps: 15, cameraHeight: 360,
-    },
-    dengeli: {
-      label: 'Dengeli',
-      audioBitrate: 48_000, cameraBitrate: 1_000_000, screenBitrate: 3_000_000,
-      screenFps: 30, cameraHeight: 480,
-    },
-    yuksek: {
-      label: 'Yüksek',
-      audioBitrate: 64_000, cameraBitrate: 2_500_000, screenBitrate: 6_000_000,
-      screenFps: 60, cameraHeight: 720,
-    },
+  media: {
+    audioBitrate: 64_000,        // Opus — ses her zaman öncelikli, sabit
+    cameraBitrate: 1_500_000,    // kamera upload tavanı
+    cameraHeight: 720,           // kamera yakalama yüksekliği
   },
-  defaultProfile: 'dengeli',
+
+  // Ekran upload bitrate'ini seçilen çözünürlük×fps'ten türet. Sabit bits-per-pixel
+  // + makul tavan: sesi açlığa düşürmeyecek kadar düşük, neti koruyacak kadar yüksek.
+  screenBitrate(height, fps) {
+    const width = Math.round((height * 16) / 9);
+    const bpp = 0.08;                                       // ekran içeriği için
+    const raw = Math.round(width * height * fps * bpp);
+    return Math.max(1_000_000, Math.min(8_000_000, raw));  // 1–8 Mbps
+  },
 };
 
 // Tek "ws://host:port" veya "wss://host" değerinden REST ve WS adreslerini türet.

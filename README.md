@@ -33,6 +33,22 @@ Cortex, arkadaş grupları için geliştirilmiş açık kaynaklı bir masaüstü
 
 Medya akışı WebRTC ile kullanıcılar arasında P2P gider. Backend hesap, sunucu, kanal, mesaj, presence ve WebRTC signaling işlerini yapar. Bazı ağlarda P2P doğrudan kurulamaz; gerçek kullanım için TURN önerilir.
 
+## İndirme
+
+Canlı kurulum sayfası:
+
+```text
+https://cortexapp.web.tr/indir
+```
+
+Doğrudan son Windows kurulum dosyası:
+
+```text
+https://github.com/anilcemelemir/Cortex/releases/latest/download/Cortex-Kurulum.exe
+```
+
+Kurulum dosyaları GitHub Releases üzerinde yayınlanır; domain üzerindeki indirme sayfası her zaman son sürüme yönlenir.
+
 ## Yerelde Çalıştırma
 
 Gerekenler:
