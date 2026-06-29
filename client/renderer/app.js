@@ -890,7 +890,8 @@ async function joinVoice(channelId) {
 
   // Mikrofonu başlat
   try {
-    await media.startMic(window.Store.get('micId'));
+    const micStream = await media.startMic(window.Store.get('micId'));
+    if (!micStream) throw new Error('Mikrofon akışı başlatılamadı');
   } catch (e) { alert('Mikrofona erişilemedi: ' + e.message); return; }
 
   appState.voice.connected = true;
@@ -915,6 +916,7 @@ async function joinVoice(channelId) {
 
 async function leaveVoice() {
   const wasConnected = appState.voice.connected;
+  clearTimeout(micRecoveryTimer);
   mesh.leave();
   for (const audio of appState.voice.audioEls.values()) audio.remove();
   appState.voice.audioEls.clear();
@@ -948,6 +950,45 @@ async function leaveVoice() {
 // sunucuda yokuz ("hayalet katılım"). Yerel ölü peer'leri ve uzak ses/görüntü
 // elemanlarını temizleyip aynı kanala YENİDEN katılırız — mikrofonu yeniden
 // başlatmadan (yerel akış korunur). voice-joined olayı peer'leri yeniden kurar.
+let micRecoveryTimer = null;
+let micRecoveryInFlight = false;
+media.onMicEnded = (reason) => scheduleMicRecovery(reason);
+
+function scheduleMicRecovery(reason = 'unknown') {
+  if (!appState.voice.connected) return;
+  clearTimeout(micRecoveryTimer);
+  micRecoveryTimer = setTimeout(() => {
+    restartLocalMic(reason).catch((e) => console.warn('Mikrofon kurtarma hatası:', e));
+  }, reason === 'muted' ? 500 : 120);
+}
+
+async function restartLocalMic(reason = 'manual', deviceId = window.Store.get('micId')) {
+  if (!appState.voice.connected || micRecoveryInFlight) return;
+  micRecoveryInFlight = true;
+  const voiceChannelId = appState.voice.channelId;
+  try {
+    if (reason !== 'rnnoise-error' && window.Store.get('noiseSuppression') !== false) {
+      media.resetNoiseSuppressionFailure?.();
+    }
+    const stream = await media.startMic(deviceId);
+    if (!stream) return;
+    if (!appState.voice.connected || appState.voice.channelId !== voiceChannelId) {
+      media.stopMic();
+      return;
+    }
+    applyMicEnabled();
+    await mesh.updateTrack('mic');
+    startVAD(media.micMonitorStream || media.rawMicStream || media.micStream, appState.me.id);
+    broadcastVoiceState();
+    console.info(`Mikrofon akışı yenilendi (${reason})`);
+  } catch (e) {
+    console.warn(`Mikrofon akışı yenilenemedi (${reason}):`, e);
+    toast('Mikrofon yeniden bağlanamadı', 'error');
+  } finally {
+    micRecoveryInFlight = false;
+  }
+}
+
 async function rejoinVoice() {
   const channelId = appState.voice.channelId;
   if (!channelId) return;
@@ -1444,13 +1485,16 @@ function startVAD(stream, userId) {
   // Suspended context = analizör düz veri okur = seviye hep eşiğin altında =
   // VAD kapısı hiç açılmaz (mikrofon kalıcı kapalı). Mutlaka resume et.
   if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  ctx.onstatechange = () => {
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  };
   const src = ctx.createMediaStreamSource(stream);
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 512;
   src.connect(analyser);
   const data = new Uint8Array(analyser.fftSize);
   const isSelf = userId === appState.me.id;
-  let raf;
+  let timer;
   let speaking = false;
   let lastAbove = 0;
   const loop = () => {
@@ -1471,12 +1515,12 @@ function startVAD(stream, userId) {
       // Kendi mikrofonumuz + VAD modu: yalnızca konuşurken gönder (gürültü kapısı)
       if (isSelf && appState.mode !== 'ptt') { appState.voice.vadSpeaking = speaking; applyMicEnabled(); }
     }
-    raf = requestAnimationFrame(loop);
   };
   loop();
-  vadCtx.set(userId, { ctx, stop: () => cancelAnimationFrame(raf) });
+  timer = setInterval(loop, 40);
+  vadCtx.set(userId, { ctx, stop: () => clearInterval(timer) });
 }
-function stopVAD(userId) { const v = vadCtx.get(userId); if (v) { v.stop(); v.ctx.close(); vadCtx.delete(userId); } }
+function stopVAD(userId) { const v = vadCtx.get(userId); if (v) { v.stop(); v.ctx.onstatechange = null; v.ctx.close(); vadCtx.delete(userId); } }
 function stopAllVAD() { for (const id of [...vadCtx.keys()]) stopVAD(id); }
 
 // =============================================================
@@ -1770,7 +1814,10 @@ $('btn-save-profile').addEventListener('click', async () => {
   }
 });
 
-$('sel-mic').addEventListener('change', async (e) => { window.Store.set('micId', e.target.value); if (appState.voice.connected) { await media.startMic(e.target.value); applyMicEnabled(); await mesh.updateTrack('mic'); startVAD(media.micMonitorStream || media.rawMicStream || media.micStream, appState.me.id); } });
+$('sel-mic').addEventListener('change', async (e) => {
+  window.Store.set('micId', e.target.value);
+  if (appState.voice.connected) await restartLocalMic('device-select', e.target.value);
+});
 $('sel-speaker').addEventListener('change', async (e) => { window.Store.set('speakerId', e.target.value); media.setOutputDevice(e.target.value); for (const a of appState.voice.audioEls.values()) await media.applySinkId(a); for (const a of appState.voice.screenAudioEls.values()) await media.applySinkId(a); });
 
 // Cihaz takilip cikinca (ornek: kulaklik), secili cikis cihazini yeniden uygula
@@ -1778,7 +1825,18 @@ $('sel-speaker').addEventListener('change', async (e) => { window.Store.set('spe
 navigator.mediaDevices.addEventListener('devicechange', async () => {
   for (const a of appState.voice.audioEls.values()) await media.applySinkId(a);
   for (const a of appState.voice.screenAudioEls.values()) await media.applySinkId(a);
+  if (appState.voice.connected && !media.isMicHealthy()) scheduleMicRecovery('devicechange');
   if (!$('settings-modal').classList.contains('hidden')) await refreshDeviceLists();
+});
+
+function checkMicAfterFocus(reason) {
+  if (!appState.voice.connected) return;
+  media.resumeMicContext?.();
+  if (!media.isMicHealthy()) scheduleMicRecovery(reason);
+}
+window.addEventListener('focus', () => checkMicAfterFocus('window-focus'));
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkMicAfterFocus('visibility');
 });
 $('sel-camera').addEventListener('change', async (e) => { window.Store.set('cameraId', e.target.value); if (appState.voice.camOn) { await media.startCamera(e.target.value, window.CONFIG.media.cameraHeight); await mesh.updateTrack('camera'); showVideoOnTile(appState.me.id, media.cameraTrack); } });
 $('range-input-gain').addEventListener('input', (e) => {
@@ -1802,12 +1860,11 @@ $('chk-activity-enabled').addEventListener('change', (e) => { window.Store.set('
 // Gürültü azaltma toggle — anında uygula (gerekirse mikrofonu yeni ayarla yeniden başlat)
 $('chk-noise-suppression').addEventListener('change', async (e) => {
   window.Store.set('noiseSuppression', e.target.checked);
+  if (e.target.checked) media.resetNoiseSuppressionFailure?.();
   if (appState.voice.connected) {
     try {
-      await media.startMic(window.Store.get('micId'));
-      applyMicEnabled();
-      await mesh.updateTrack('mic');
-      startVAD(media.micMonitorStream || media.rawMicStream || media.micStream, appState.me.id);
+      await restartLocalMic('noise-toggle');
+      return;
     } catch (err) { console.warn('Mikrofon yeniden başlatılamadı:', err); }
   }
 });
