@@ -475,7 +475,7 @@ CORTEX_TURN_CREDENTIAL=TURN_SIFRESI
 Sonra GitHub > Actions > Release Windows Installer > Run workflow:
 
 ```text
-version = 1.2.2
+version = 1.2.3
 ```
 
 Workflow Windows runner'da installer uretir ve GitHub Release'e su dosyayi ekler:
@@ -501,8 +501,8 @@ Bu sayfadaki buton da ayni latest release dosyasina gider.
 Alternatif olarak tag push ile release tetikleyebilirsin:
 
 ```bash
-git tag v1.2.2
-git push origin v1.2.2
+git tag v1.2.3
+git push origin v1.2.3
 ```
 
 Onemli: Eski TURN sifresi public commit gecmisinde gorunmus olabilir. Canliya

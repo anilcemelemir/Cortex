@@ -38,8 +38,10 @@ class VoiceMesh {
       if (channelId !== this.channelId) return;
       // Mevcut kişilere BEN bağlantı başlatırım (initiator)
       for (const p of peers) {
+        const old = this.peers.get(p.userId);
+        if (old) old.close();
         const peer = this._createPeer(p.userId, /*initiator*/ true);
-        peer.start();
+        peer.start().catch((e) => console.warn('peer baslatilamadi', e));
       }
     });
     g.on('voice-peer-joined', ({ channelId, userId }) => {
@@ -49,7 +51,8 @@ class VoiceMesh {
       const old = this.peers.get(userId);
       if (old) { old.close(); this.peers.delete(userId); }
       // Yeni gelen bana bağlanacak; ben non-initiator bekliyorum
-      this._createPeer(userId, /*initiator*/ false);
+      const peer = this._createPeer(userId, /*initiator*/ false);
+      peer.start().catch((e) => console.warn('peer baslatilamadi', e));
     });
     g.on('voice-peer-left', ({ channelId, userId }) => {
       if (channelId !== this.channelId) return;
@@ -119,7 +122,7 @@ class PeerConn {
     this.initiator = initiator;
 
     // Perfect negotiation rolleri
-    this.polite = mesh.myUserId < userId;
+    this.polite = !initiator;
     this.makingOffer = false;
     this.ignoreOffer = false;
 
@@ -145,6 +148,7 @@ class PeerConn {
     };
 
     this.pc.onnegotiationneeded = async () => {
+      if (!this.initiator) return;
       try {
         this.makingOffer = true;
         let offer = await this.pc.createOffer();
@@ -160,12 +164,12 @@ class PeerConn {
 
     this.pc.ontrack = (ev) => {
       const mid = ev.transceiver.mid;
-      const type = this.remoteTrackMap[mid];
+      const type = this._typeForTransceiver(ev.transceiver) || this.remoteTrackMap[mid];
       if (type) this._emitRemoteTrack(type, ev.track, ev.streams[0]);
-      else this.pendingTracks.push({ mid, track: ev.track, stream: ev.streams[0] });
+      else this.pendingTracks.push({ mid, transceiver: ev.transceiver, track: ev.track, stream: ev.streams[0] });
 
       ev.track.onended = () => {
-        const t = this.remoteTrackMap[mid];
+        const t = this._typeForTransceiver(ev.transceiver) || this.remoteTrackMap[mid];
         if (t) this.mesh.onRemoteTrackEnded(this.userId, t);
       };
     };
@@ -178,8 +182,7 @@ class PeerConn {
   }
 
   _setupDataChannel() {
-    const iCreate = this.mesh.myUserId > this.userId;
-    if (iCreate) {
+    if (this.initiator) {
       this.dc = this.pc.createDataChannel('meta');
       this._wireDataChannel();
     } else {
@@ -189,19 +192,28 @@ class PeerConn {
 
   _wireDataChannel() {
     this.dc.onopen = () => this._sendTrackMap();
+    if (this.dc.readyState === 'open') queueMicrotask(() => this._sendTrackMap());
     this.dc.onmessage = (ev) => {
       let msg; try { msg = JSON.parse(ev.data); } catch { return; }
       if (msg.type === 'track-map') {
         this.remoteTrackMap = msg.map;
         const still = [];
         for (const p of this.pendingTracks) {
-          const t = this.remoteTrackMap[p.mid];
+          const t = this._typeForTransceiver(p.transceiver) || this.remoteTrackMap[p.mid];
           if (t) this._emitRemoteTrack(t, p.track, p.stream);
           else still.push(p);
         }
         this.pendingTracks = still;
       }
     };
+  }
+
+  _typeForTransceiver(transceiver) {
+    if (!transceiver) return null;
+    for (const [type, tx] of Object.entries(this.tx)) {
+      if (tx === transceiver || (tx.mid && tx.mid === transceiver.mid)) return type;
+    }
+    return null;
   }
 
   _sendTrackMap() {
