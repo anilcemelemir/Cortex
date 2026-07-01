@@ -23,6 +23,12 @@ contextBridge.exposeInMainWorld('audio', {
   loadRnnoiseWasm: (simd) => ipcRenderer.invoke('load-rnnoise-wasm', simd),
 });
 
+contextBridge.exposeInMainWorld('settings', {
+  get: () => ipcRenderer.invoke('settings-get'),
+  set: (key, value) => ipcRenderer.invoke('settings-set', key, value),
+  update: (patch) => ipcRenderer.invoke('settings-update', patch),
+});
+
 contextBridge.exposeInMainWorld('system', {
   // Windows ile başlat (oturum açılış öğesi) durumunu oku / ayarla
   getAutoLaunch: () => ipcRenderer.invoke('auto-launch-get'),

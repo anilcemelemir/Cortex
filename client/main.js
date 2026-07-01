@@ -21,6 +21,24 @@ app.isQuitting = false;
 const startHidden = process.argv.includes('--autostart');
 const APP_ICON = path.join(__dirname, '..', 'assets', 'icon.png');
 
+function settingsFilePath() {
+  return path.join(app.getPath('userData'), 'settings.json');
+}
+
+function readSettingsFile() {
+  try {
+    return JSON.parse(fs.readFileSync(settingsFilePath(), 'utf8')) || {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSettingsFile(settings) {
+  const file = settingsFilePath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(settings || {}, null, 2), 'utf8');
+}
+
 // Tek örnek: ikinci kez açılırsa (örn. tepsideyken kısayola tıklanırsa)
 // yeni pencere açma, mevcut olanı öne getir.
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -249,6 +267,18 @@ app.on('will-quit', () => ptt.shutdown());
 ipcMain.handle('ptt-start', (e, code) => ptt.start(code));
 ipcMain.handle('ptt-stop', () => { ptt.stop(); });
 ipcMain.handle('activity-detect', () => detectDesktopActivity());
+ipcMain.handle('settings-get', () => readSettingsFile());
+ipcMain.handle('settings-set', (e, key, value) => {
+  const settings = readSettingsFile();
+  settings[key] = value;
+  writeSettingsFile(settings);
+  return settings;
+});
+ipcMain.handle('settings-update', (e, patch) => {
+  const settings = { ...readSettingsFile(), ...(patch || {}) };
+  writeSettingsFile(settings);
+  return settings;
+});
 
 // --- IPC: RNNoise WASM ikilisini diskten oku (renderer fetch(file://) güvenilmez) ---
 // renderer SIMD destegine gore dosyayi secer; ArrayBuffer dondururuz, worklet'e

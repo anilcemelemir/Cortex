@@ -154,6 +154,70 @@ function playSound(name) {
   window.CortexSounds?.play(name);
 }
 
+const FLOW_TICK_MS = 80;
+const VOICE_SESSION_SETTLE_MS = 1600;
+const VOICE_JOIN_SETTLE_MS = 700;
+let flowTimer = null;
+let voiceFlowActive = false;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function setVoiceBusy(busy) {
+  voiceFlowActive = busy;
+  for (const id of ['vc-leave', 'btn-disconnect', 'vc-cam', 'vc-screen', 'vc-mic', 'btn-mic']) {
+    const node = $(id);
+    if (node) node.disabled = busy;
+  }
+}
+
+function setFlowStep(title, message, durationMs = 1000) {
+  const overlay = $('flow-overlay');
+  if (!overlay) return;
+  clearInterval(flowTimer);
+  const total = Math.max(1, durationMs);
+  const startedAt = performance.now();
+  $('flow-title').textContent = title;
+  $('flow-message').textContent = message;
+  overlay.classList.remove('hidden');
+  const update = () => {
+    const elapsed = performance.now() - startedAt;
+    const remaining = Math.max(0, total - elapsed);
+    $('flow-countdown').textContent = (remaining / 1000).toFixed(1);
+    $('flow-progress-bar').style.width = `${Math.min(100, (elapsed / total) * 100)}%`;
+  };
+  update();
+  flowTimer = setInterval(update, FLOW_TICK_MS);
+}
+
+async function waitFlow(ms, title, message) {
+  setFlowStep(title, message, ms);
+  await sleep(ms);
+}
+
+function hideFlow() {
+  clearInterval(flowTimer);
+  flowTimer = null;
+  $('flow-overlay')?.classList.add('hidden');
+}
+
+async function runVoiceFlow(title, message, work) {
+  if (voiceFlowActive) {
+    toast('Ses işlemi devam ediyor, birkaç saniye bekle.', 'info');
+    return;
+  }
+  setVoiceBusy(true);
+  setFlowStep(title, message, 1200);
+  try {
+    return await work({ step: setFlowStep, wait: waitFlow });
+  } finally {
+    hideFlow();
+    setVoiceBusy(false);
+    updateVoiceButtons();
+  }
+}
+
 // --- Bildirim (toast) ---
 function toast(message, type = 'success') {
   const container = $('toast-container');
@@ -200,6 +264,70 @@ function syncVoiceTuneLabels() {
   updateVoiceMeterThreshold();
 }
 
+let deviceCache = { mics: [], speakers: [], cameras: [] };
+
+function deviceKeys(kind) {
+  if (kind === 'mic') return { id: 'micId', profile: 'micProfile' };
+  if (kind === 'speaker') return { id: 'speakerId', profile: 'speakerProfile' };
+  return { id: 'cameraId', profile: 'cameraProfile' };
+}
+
+function normalizedDeviceLabel(value) {
+  return String(value || '')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*\([^)]*\)\s*/g, ' ')
+    .trim();
+}
+
+function profileFromDevice(device) {
+  if (!device) return null;
+  return {
+    kind: device.kind,
+    deviceId: device.deviceId || '',
+    groupId: device.groupId || '',
+    label: device.label || '',
+    labelKey: normalizedDeviceLabel(device.label),
+    savedAt: Date.now(),
+  };
+}
+
+function resolvePreferredDevice(devices, selectedId, profile) {
+  if (!devices?.length) return null;
+  if (selectedId) {
+    const exact = devices.find((d) => d.deviceId === selectedId);
+    if (exact) return exact;
+  }
+  if (profile?.groupId) {
+    const byGroup = devices.find((d) => d.groupId && d.groupId === profile.groupId);
+    if (byGroup) return byGroup;
+  }
+  const labelKey = profile?.labelKey || normalizedDeviceLabel(profile?.label);
+  if (labelKey) {
+    const byLabel = devices.find((d) => normalizedDeviceLabel(d.label) === labelKey);
+    if (byLabel) return byLabel;
+    const loose = devices.find((d) => {
+      const current = normalizedDeviceLabel(d.label);
+      return current && (current.includes(labelKey) || labelKey.includes(current));
+    });
+    if (loose) return loose;
+  }
+  return selectedId || profile ? null : devices[0];
+}
+
+function rememberDevice(kind, device) {
+  if (!device) return null;
+  const keys = deviceKeys(kind);
+  window.Store.update({ [keys.id]: device.deviceId, [keys.profile]: profileFromDevice(device) });
+  return device.deviceId;
+}
+
+function resolveAndRememberDevice(kind, devices) {
+  const keys = deviceKeys(kind);
+  const device = resolvePreferredDevice(devices, window.Store.get(keys.id), window.Store.get(keys.profile));
+  return device ? rememberDevice(kind, device) : (window.Store.get(keys.id) || '');
+}
+
 const voiceMeter = {
   ctx: null,
   source: null,
@@ -240,6 +368,9 @@ function renderVoiceMeter(db) {
 async function startVoiceLevelMeter() {
   stopVoiceLevelMeter();
   const runId = ++voiceMeter.runId;
+  if (!media.micMonitorStream && !media.micStream) {
+    await refreshDeviceLists().catch((e) => console.warn('Ses cihazlari yenilenemedi:', e));
+  }
   const stream = media.micMonitorStream || media.micStream || await navigator.mediaDevices.getUserMedia({
     audio: {
       deviceId: window.Store.get('micId') ? { exact: window.Store.get('micId') } : undefined,
@@ -364,10 +495,12 @@ function currentMessageChannel() {
 // =============================================================
 //  Önyükleme
 // =============================================================
-window.Store.set('serverUrl', window.CONFIG.defaultServer);
-$('auth-server').value = window.CONFIG.defaultServer;
-
 (async function boot() {
+  await window.Store.ready?.();
+  window.Store.set('serverUrl', window.CONFIG.defaultServer);
+  $('auth-server').value = window.CONFIG.defaultServer;
+  appState.mode = window.Store.get('voiceMode');
+  appState.pttKey = window.Store.get('pttKey');
   const token = window.Store.get('token');
   if (token) {
     try {
@@ -424,6 +557,8 @@ async function enterApp(user) {
   appState.me = cacheUser(user);
   $('auth-screen').classList.add('hidden');
   $('app').classList.remove('hidden');
+
+  await refreshDeviceLists().catch((e) => console.warn('Cihaz tercihleri yüklenemedi:', e));
 
   // Kayitli cikis cihazini (hoparlor) hemen uygula. Aksi halde selectedOutputId
   // null kalir, applySinkId boşa çalışır ve uzak ses Windows VARSAYILAN cihazindan
@@ -875,6 +1010,10 @@ function renderTyping(channelId) {
 //  Ses kanalı
 // =============================================================
 async function selectVoiceChannel(channelId) {
+  if (voiceFlowActive) {
+    toast('Ses bağlantısı hazırlanıyor, işlem bitince tekrar dene.', 'info');
+    return;
+  }
   // Zaten bu kanaldaysak sadece görünüme geç
   if (appState.voice.connected && appState.voice.channelId === channelId) {
     showVoiceView(channelId);
@@ -884,12 +1023,27 @@ async function selectVoiceChannel(channelId) {
 }
 
 async function joinVoice(channelId) {
-  if (appState.voice.connected) await leaveVoice();
+  return runVoiceFlow('Ses kanalına bağlanılıyor', 'Mikrofon ve WebRTC oturumu hazırlanıyor.', async (flow) => {
+    if (appState.voice.connected) {
+      await leaveVoiceInternal({ navigate: false, notifySound: false });
+      await flow.wait(
+        VOICE_SESSION_SETTLE_MS,
+        'Eski oturum temizleniyor',
+        'Sunucu eski ses oturumunu düşürürken kısa bir tampon bırakılıyor.'
+      );
+    }
+    await flow.wait(450, 'Mikrofon hazırlanıyor', 'Ses cihazı ve gürültü engelleme zinciri kuruluyor.');
+    await joinVoiceInternal(channelId);
+    await flow.wait(VOICE_JOIN_SETTLE_MS, 'Bağlantı doğrulanıyor', 'Peer bağlantıları ve ses kanalı eşleniyor.');
+  });
+}
 
+async function joinVoiceInternal(channelId) {
   const guildId = appState.currentGuildId;
 
   // Mikrofonu başlat
   try {
+    await refreshDeviceLists();
     const micStream = await media.startMic(window.Store.get('micId'));
     if (!micStream) throw new Error('Mikrofon akışı başlatılamadı');
   } catch (e) { alert('Mikrofona erişilemedi: ' + e.message); return; }
@@ -915,6 +1069,18 @@ async function joinVoice(channelId) {
 }
 
 async function leaveVoice() {
+  if (!appState.voice.connected) return;
+  return runVoiceFlow('Ses kanalından ayrılınıyor', 'Peer bağlantıları ve yerel medya kapatılıyor.', async (flow) => {
+    await leaveVoiceInternal();
+    await flow.wait(
+      VOICE_SESSION_SETTLE_MS,
+      'Oturum kapatılıyor',
+      'Sunucu ses varlığını temizlerken kısa bir süre bekleniyor.'
+    );
+  });
+}
+
+async function leaveVoiceInternal({ navigate = true, notifySound = true } = {}) {
   const wasConnected = appState.voice.connected;
   clearTimeout(micRecoveryTimer);
   mesh.leave();
@@ -934,7 +1100,7 @@ async function leaveVoice() {
   stopPTT();
   renderMemberSidebar();
 
-  if (appState.view === 'voice') {
+  if (navigate && appState.view === 'voice') {
     // text görünümüne geri dön
     const g = appState.guilds.get(appState.currentGuildId);
     const t = g?.channels.find((c) => c.type === 'text');
@@ -942,7 +1108,7 @@ async function leaveVoice() {
   } else {
     renderChannelList();
   }
-  if (wasConnected) playSound('leave');
+  if (wasConnected && notifySound) playSound('leave');
 }
 
 // WS yeniden bağlandığında çağrılır. Soket koptuğunda sunucu bizi ses odasından
@@ -967,6 +1133,8 @@ async function restartLocalMic(reason = 'manual', deviceId = window.Store.get('m
   micRecoveryInFlight = true;
   const voiceChannelId = appState.voice.channelId;
   try {
+    await refreshDeviceLists().catch((e) => console.warn('Ses cihazlari yenilenemedi:', e));
+    deviceId = window.Store.get('micId') || deviceId;
     if (reason !== 'rnnoise-error' && window.Store.get('noiseSuppression') !== false) {
       media.resetNoiseSuppressionFailure?.();
     }
@@ -992,20 +1160,28 @@ async function restartLocalMic(reason = 'manual', deviceId = window.Store.get('m
 async function rejoinVoice() {
   const channelId = appState.voice.channelId;
   if (!channelId) return;
+  return runVoiceFlow('Ses bağlantısı yenileniyor', 'Eski peer bağlantıları temizleniyor.', async (flow) => {
+    await flow.wait(
+      VOICE_SESSION_SETTLE_MS,
+      'Eski oturum düşürülüyor',
+      'Sunucu yeniden bağlanan oturumu eşitlerken bekleniyor.'
+    );
 
-  const remoteIds = [...mesh.peers.keys()];
-  mesh.resetPeers();
-  for (const uid of remoteIds) {
-    removeVoiceTile(uid); // voice + screen tile + screenStreams girdisi
-    appState.voice.pings.delete(uid);
-    const a = appState.voice.audioEls.get(uid); if (a) { a.remove(); appState.voice.audioEls.delete(uid); }
-    const sa = appState.voice.screenAudioEls.get(uid); if (sa) { sa.remove(); appState.voice.screenAudioEls.delete(uid); }
-    stopVAD(uid);
-  }
-  recomputePing();
+    const remoteIds = [...mesh.peers.keys()];
+    mesh.resetPeers();
+    for (const uid of remoteIds) {
+      removeVoiceTile(uid); // voice + screen tile + screenStreams girdisi
+      appState.voice.pings.delete(uid);
+      const a = appState.voice.audioEls.get(uid); if (a) { a.remove(); appState.voice.audioEls.delete(uid); }
+      const sa = appState.voice.screenAudioEls.get(uid); if (sa) { sa.remove(); appState.voice.screenAudioEls.delete(uid); }
+      stopVAD(uid);
+    }
+    recomputePing();
 
-  await mesh.join(channelId);     // join-voice → sunucu bizi tekrar ekler, voice-joined döner
-  broadcastVoiceState();          // mute/cam/screen durumunu yeniden duyur
+    await mesh.join(channelId);     // join-voice → sunucu bizi tekrar ekler, voice-joined döner
+    broadcastVoiceState();          // mute/cam/screen durumunu yeniden duyur
+    await flow.wait(VOICE_JOIN_SETTLE_MS, 'Ses tekrar bağlanıyor', 'Peer bağlantıları yeniden kuruluyor.');
+  });
 }
 
 function showVoiceView(channelId) {
@@ -1201,6 +1377,7 @@ $('vc-cam').addEventListener('click', async () => {
   if (!v.connected) return;
   if (!v.camOn) {
     try {
+      await refreshDeviceLists();
       await media.startCamera(window.Store.get('cameraId'), window.CONFIG.media.cameraHeight);
       v.camOn = true;
       await mesh.updateTrack('camera');
@@ -1744,13 +1921,34 @@ function setSettingsTab(tab) {
 
 async function refreshDeviceLists() {
   const { mics, speakers, cameras } = await media.enumerateDevices();
-  fillDeviceSelect($('sel-mic'), mics, window.Store.get('micId'));
-  fillDeviceSelect($('sel-speaker'), speakers, window.Store.get('speakerId'));
-  fillDeviceSelect($('sel-camera'), cameras, window.Store.get('cameraId'));
+  deviceCache = { mics, speakers, cameras };
+  const micId = resolveAndRememberDevice('mic', mics);
+  const speakerId = resolveAndRememberDevice('speaker', speakers);
+  const cameraId = resolveAndRememberDevice('camera', cameras);
+  fillDeviceSelect($('sel-mic'), mics, micId);
+  fillDeviceSelect($('sel-speaker'), speakers, speakerId);
+  fillDeviceSelect($('sel-camera'), cameras, cameraId);
 }
 function fillDeviceSelect(sel, devices, selectedId) {
   sel.innerHTML = '';
-  devices.forEach((d, i) => { const o = el('option'); o.value = d.deviceId; o.textContent = d.label || `Cihaz ${i + 1}`; if (d.deviceId === selectedId) o.selected = true; sel.appendChild(o); });
+  if (!devices.length) {
+    const o = el('option');
+    o.value = '';
+    o.textContent = 'Cihaz bulunamadı';
+    o.disabled = true;
+    o.selected = true;
+    sel.appendChild(o);
+    return;
+  }
+  devices.forEach((d, i) => {
+    const o = el('option');
+    o.value = d.deviceId;
+    o.textContent = d.label || `Cihaz ${i + 1}`;
+    o.dataset.groupId = d.groupId || '';
+    o.dataset.kind = d.kind || '';
+    if (d.deviceId === selectedId) o.selected = true;
+    sel.appendChild(o);
+  });
 }
 function syncSettingsUI() {
   document.querySelectorAll('input[name="voice-mode"]').forEach((r) => { r.checked = r.value === appState.mode; });
@@ -1815,18 +2013,26 @@ $('btn-save-profile').addEventListener('click', async () => {
 });
 
 $('sel-mic').addEventListener('change', async (e) => {
-  window.Store.set('micId', e.target.value);
+  const device = deviceCache.mics.find((d) => d.deviceId === e.target.value);
+  rememberDevice('mic', device);
   if (appState.voice.connected) await restartLocalMic('device-select', e.target.value);
 });
-$('sel-speaker').addEventListener('change', async (e) => { window.Store.set('speakerId', e.target.value); media.setOutputDevice(e.target.value); for (const a of appState.voice.audioEls.values()) await media.applySinkId(a); for (const a of appState.voice.screenAudioEls.values()) await media.applySinkId(a); });
+$('sel-speaker').addEventListener('change', async (e) => {
+  const device = deviceCache.speakers.find((d) => d.deviceId === e.target.value);
+  const id = rememberDevice('speaker', device) || e.target.value;
+  media.setOutputDevice(id);
+  for (const a of appState.voice.audioEls.values()) await media.applySinkId(a);
+  for (const a of appState.voice.screenAudioEls.values()) await media.applySinkId(a);
+});
 
 // Cihaz takilip cikinca (ornek: kulaklik), secili cikis cihazini yeniden uygula
 // ve ayarlar acsiksa listeleri tazele. Boylece ses yanlis cihaza kacmaz.
 navigator.mediaDevices.addEventListener('devicechange', async () => {
+  await refreshDeviceLists();
+  media.setOutputDevice(window.Store.get('speakerId') || null);
   for (const a of appState.voice.audioEls.values()) await media.applySinkId(a);
   for (const a of appState.voice.screenAudioEls.values()) await media.applySinkId(a);
   if (appState.voice.connected && !media.isMicHealthy()) scheduleMicRecovery('devicechange');
-  if (!$('settings-modal').classList.contains('hidden')) await refreshDeviceLists();
 });
 
 function checkMicAfterFocus(reason) {
@@ -1838,7 +2044,15 @@ window.addEventListener('focus', () => checkMicAfterFocus('window-focus'));
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') checkMicAfterFocus('visibility');
 });
-$('sel-camera').addEventListener('change', async (e) => { window.Store.set('cameraId', e.target.value); if (appState.voice.camOn) { await media.startCamera(e.target.value, window.CONFIG.media.cameraHeight); await mesh.updateTrack('camera'); showVideoOnTile(appState.me.id, media.cameraTrack); } });
+$('sel-camera').addEventListener('change', async (e) => {
+  const device = deviceCache.cameras.find((d) => d.deviceId === e.target.value);
+  const id = rememberDevice('camera', device) || e.target.value;
+  if (appState.voice.camOn) {
+    await media.startCamera(id, window.CONFIG.media.cameraHeight);
+    await mesh.updateTrack('camera');
+    showVideoOnTile(appState.me.id, media.cameraTrack);
+  }
+});
 $('range-input-gain').addEventListener('input', (e) => {
   const value = clampNumber(e.target.value, -20, 20, 0);
   window.Store.set('inputGainDb', value);

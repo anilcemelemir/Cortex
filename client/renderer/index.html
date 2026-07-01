@@ -353,6 +353,18 @@
     </div>
   </div>
 
+  <div id="flow-overlay" class="flow-overlay hidden" aria-live="polite" aria-busy="true">
+    <div class="flow-card">
+      <div class="flow-spinner" aria-hidden="true"></div>
+      <div class="flow-copy">
+        <h2 id="flow-title">Hazırlanıyor</h2>
+        <p id="flow-message">Bağlantı düzenleniyor.</p>
+      </div>
+      <div class="flow-count"><span id="flow-countdown">0.0</span> sn</div>
+      <div class="flow-progress"><span id="flow-progress-bar"></span></div>
+    </div>
+  </div>
+
   <!-- Bildirimler (toast) -->
   <div id="toast-container" class="toast-container"></div>
 

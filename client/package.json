@@ -1,6 +1,6 @@
 {
   "name": "cortex-client",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "Düşük gecikmeli P2P sesli/görüntülü sohbet masaüstü uygulaması",
   "main": "main.js",
   "scripts": {
