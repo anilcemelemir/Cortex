@@ -22,6 +22,9 @@ class VoiceMesh {
       degradationPreference: 'maintain-resolution',
     };
     this.peers = new Map(); // userId -> PeerConn
+    // Peer henüz kurulmadan gelen offer/ICE adayları burada bekletilir.
+    // userId -> signal[]  (peer oluşunca sırayla uygulanır)
+    this.pendingSignals = new Map();
 
     // Dışa olaylar
     this.onRemoteTrack = () => {};      // (userId, type, track, stream)
@@ -59,11 +62,30 @@ class VoiceMesh {
       const peer = this.peers.get(userId);
       if (peer) peer.close();
       this.peers.delete(userId);
+      this.pendingSignals.delete(userId);
     });
     g.on('signal', ({ fromUserId, signal }) => {
       const peer = this.peers.get(fromUserId);
-      if (peer) peer.handleSignal(signal);
+      if (peer) { peer.handleSignal(signal); return; }
+      // Peer henüz oluşmadan gelen offer/ICE adayını DÜŞÜRME — kısa süre
+      // tamponla, peer kurulunca sırayla uygula. Tek bir offer/aday kaybolursa
+      // bağlantı hiç kurulmaz (özellikle yeniden katılma / çok kişi durumunda).
+      this._bufferSignal(fromUserId, signal);
     });
+  }
+
+  _bufferSignal(userId, signal) {
+    let arr = this.pendingSignals.get(userId);
+    if (!arr) { arr = []; this.pendingSignals.set(userId, arr); }
+    arr.push(signal);
+    if (arr.length > 60) arr.shift(); // sınırsız büyümeyi önle
+  }
+
+  _flushSignals(userId, peer) {
+    const arr = this.pendingSignals.get(userId);
+    if (!arr) return;
+    this.pendingSignals.delete(userId);
+    for (const s of arr) peer.handleSignal(s);
   }
 
   async join(channelId) {
@@ -76,6 +98,7 @@ class VoiceMesh {
     window.gateway.send({ type: 'leave-voice' });
     for (const peer of this.peers.values()) peer.close();
     this.peers.clear();
+    this.pendingSignals.clear();
     this.channelId = null;
   }
 
@@ -84,6 +107,7 @@ class VoiceMesh {
   resetPeers() {
     for (const peer of this.peers.values()) peer.close();
     this.peers.clear();
+    this.pendingSignals.clear();
   }
 
   _sendSignal(targetUserId, signal) {
@@ -93,6 +117,8 @@ class VoiceMesh {
   _createPeer(userId, initiator) {
     const peer = new PeerConn(this, userId, initiator);
     this.peers.set(userId, peer);
+    // Peer kurulmadan önce gelmiş (tamponlanmış) offer/ICE varsa şimdi uygula.
+    this._flushSignals(userId, peer);
     return peer;
   }
 
@@ -125,6 +151,11 @@ class PeerConn {
     this.polite = !initiator;
     this.makingOffer = false;
     this.ignoreOffer = false;
+
+    // Bağlantı kurtarma durumu
+    this.closed = false;
+    this.iceRestartAttempts = 0;
+    this.iceRecoveryTimer = null;
 
     this.pc = new RTCPeerConnection({ iceServers: window.CONFIG.iceServers });
 
@@ -175,10 +206,52 @@ class PeerConn {
     };
 
     this.pc.onconnectionstatechange = () => {
-      this.mesh.onConnectionState(this.userId, this.pc.connectionState);
+      const st = this.pc.connectionState;
+      this.mesh.onConnectionState(this.userId, st);
+      if (st === 'connected') { this.iceRestartAttempts = 0; this._clearIceRecovery(); }
+      else if (st === 'failed') this._recoverConnection('failed');
+      else if (st === 'disconnected') this._scheduleIceRecovery();
     };
 
     this.statsTimer = setInterval(() => this._collectStats(), 2000);
+  }
+
+  // 'disconnected' çoğu zaman geçicidir (ağ blip'i, wifi geçişi) — hemen
+  // müdahale etme, kısa süre bekle; hâlâ toparlamadıysa ICE'ı yeniden başlat.
+  _scheduleIceRecovery() {
+    if (this.closed || this.iceRecoveryTimer) return;
+    this.iceRecoveryTimer = setTimeout(() => {
+      this.iceRecoveryTimer = null;
+      const st = this.pc.connectionState;
+      if (st === 'disconnected' || st === 'failed') this._recoverConnection(st);
+    }, 3500);
+  }
+
+  _clearIceRecovery() {
+    if (this.iceRecoveryTimer) { clearTimeout(this.iceRecoveryTimer); this.iceRecoveryTimer = null; }
+  }
+
+  // Bağlantı koptuğunda kendini toparla. restartIce() bir sonraki offer'ı yeni
+  // ICE kimlik bilgileriyle üretir → onnegotiationneeded → offer → karşı taraf
+  // yanıtlar → yol yeniden kurulur. Yalnızca initiator teklif üretebildiği için
+  // (perfect negotiation) restart'ı initiator yapar. Hatayı sadece non-initiator
+  // taraf gördüyse (asimetrik ICE zaman aşımı), initiator'dan restart İSTER.
+  // Böylece hangi taraf koparsa kopsun manuel "yeniden katıl" gerekmez.
+  _recoverConnection(reason) {
+    if (this.closed) return;
+    this._clearIceRecovery();
+    if (this.iceRestartAttempts >= 4) return; // sonsuz döngüyü engelle
+    this.iceRestartAttempts++;
+    if (this.initiator) {
+      try {
+        if (typeof this.pc.restartIce === 'function') this.pc.restartIce();
+      } catch (e) {
+        console.warn('ICE restart başarısız', e);
+      }
+    } else {
+      // Non-initiator offer üretemez → initiator'dan ICE restart iste.
+      this.mesh._sendSignal(this.userId, { restart: true });
+    }
   }
 
   _setupDataChannel() {
@@ -286,6 +359,11 @@ class PeerConn {
 
   async handleSignal(signal) {
     try {
+      if (signal.restart) {
+        // Karşı taraf ICE hatası gördü ve yeniden müzakere istedi (initiator biziz).
+        this._recoverConnection('peer-request');
+        return;
+      }
       if (signal.sdp) {
         const offerCollision =
           signal.sdp.type === 'offer' &&
@@ -332,6 +410,8 @@ class PeerConn {
   }
 
   close() {
+    this.closed = true;
+    this._clearIceRecovery();
     clearInterval(this.statsTimer);
     if (this.dc) try { this.dc.close(); } catch {}
     try { this.pc.close(); } catch {}
